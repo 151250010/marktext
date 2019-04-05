@@ -2,7 +2,7 @@
 
 Edit and save to update preferences. You can only change the JSON below!
 
-- **theme**: *String* `dark` or `light`
+- **theme**: *String* `dark`, `graphite`, `material-dark`, `one-dark`, `light` or `ulysses`
 
 - **autoSave**: *Boolean* `true` or `false`
 
@@ -11,6 +11,8 @@ Edit and save to update preferences. You can only change the JSON below!
 - **bulletListMarker**: *String* `+`,`-` or `*`
 
 - **textDirection**: *String* `ltr` or `rtl`
+
+- **titleBarStyle**: *String* `csd` (macOS only), `custom` or `native`
 
 ```json
 {
@@ -32,7 +34,9 @@ Edit and save to update preferences. You can only change the JSON below!
   "autoPairQuote": true,
   "endOfLine": "default",
   "tabSize": 4,
-  "textDirection": "ltr"
+  "textDirection": "ltr",
+  "titleBarStyle": "csd",
+  "openFilesInNewWindow": true
 }
 ```
 

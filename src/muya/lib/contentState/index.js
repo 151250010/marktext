@@ -22,6 +22,8 @@ import imagePathCtrl from './imagePathCtrl'
 import htmlBlockCtrl from './htmlBlock'
 import clickCtrl from './clickCtrl'
 import inputCtrl from './inputCtrl'
+import tocCtrl from './tocCtrl'
+import emojiCtrl from './emojiCtrl'
 import importMarkdown from '../utils/importMarkdown'
 
 const prototypes = [
@@ -44,6 +46,8 @@ const prototypes = [
   htmlBlockCtrl,
   clickCtrl,
   inputCtrl,
+  tocCtrl,
+  emojiCtrl,
   importMarkdown
 ]
 
@@ -525,8 +529,7 @@ class ContentState {
     } else if (children.length) {
       if (
         children[0].type === 'input' ||
-        (children[0].type === 'div' && children[0].editable === false) ||
-        (children[0].type === 'span' && children[0].functionType === 'languageInput')
+        (children[0].type === 'div' && children[0].editable === false)
       ) { // handle task item
         return this.firstInDescendant(children[1])
       } else {
@@ -555,8 +558,7 @@ class ContentState {
       block.preSibling &&
       preBlock.type !== 'input' &&
       preBlock.type !== 'div' &&
-      preBlock.editable !== false &&
-      preBlock.functionType !== 'languageInput'
+      preBlock.editable !== false
     ) { // handle task item and table
       return this.lastInDescendant(preBlock)
     } else if (parent) {

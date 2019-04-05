@@ -19,6 +19,7 @@ const state = {
   autoPairQuote: true,
   tabSize: 4,
   hideQuickInsertHint: false,
+  titleBarStyle: 'csd',
   // edit modes (they are not in preference.md, but still put them here)
   typewriter: false, // typewriter mode
   focus: false, // focus mode
@@ -51,7 +52,7 @@ const actions = {
       if (autoSave) {
         const { pathname, markdown } = state
         const options = getOptionsFromState(rootState.editor)
-        if (autoSave && pathname) {
+        if (pathname) {
           commit('SET_SAVE_STATUS', true)
           ipcRenderer.send('AGANI::response-file-save', { pathname, markdown, options })
         }

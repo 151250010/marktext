@@ -5,15 +5,14 @@
       <tabs v-show="showTabBar"></tabs>
       <div class="container">
         <editor
-          :theme="theme"
           :fileanme="filename"
           :markdown="markdown"
           :cursor="cursor"
           :text-direction="textDirection"
+          :platform="platform"
         ></editor>
         <source-code
           v-if="sourceCode"
-          :theme="theme"
           :markdown="markdown"
           :cursor="cursor"
           :text-direction="textDirection"
@@ -29,10 +28,6 @@
 
   export default {
     props: {
-      theme: {
-        type: String,
-        required: true
-      },
       filename: {
         type: String
       },
@@ -57,6 +52,10 @@
       textDirection: {
         type: String,
         required: true
+      },
+      platform: {
+        type: String,
+        required: true
       }
     },
     components: {
@@ -69,11 +68,15 @@
 
 <style scoped>
   .editor-with-tabs {
+    width: 100%;
+    height: 100%;
+    padding-top: var(--titleBarHeight);
     flex: 1;
     display: flex;
     flex-direction: column;
-    height: calc(100vh - var(--titleBarHeight));
+    
     overflow: hidden;
+    background: var(--editorBgColor);
     & > .container {
       flex: 1;
       overflow: hidden;

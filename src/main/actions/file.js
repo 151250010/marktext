@@ -2,12 +2,12 @@ import fs from 'fs'
 // import chokidar from 'chokidar'
 import path from 'path'
 import { promisify } from 'util'
-import { BrowserWindow, dialog, ipcMain } from 'electron'
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import appWindow from '../window'
-import { EXTENSION_HASN, EXTENSIONS, PANDOC_EXTENSIONS } from '../config'
+import { EXTENSION_HASN, EXTENSIONS, PANDOC_EXTENSIONS, URL_REG } from '../config'
 import { writeFile, writeMarkdownFile } from '../utils/filesystem'
 import appMenu from '../menu'
-import { getPath, isMarkdownFile, log, isFile, isDirectory, getRecommendTitle } from '../utils'
+import { getPath, isMarkdownFile, isMarkdownFileOrLink, normalizeAndResolvePath, log, isFile, isDirectory, getRecommendTitle } from '../utils'
 import userPreference from '../preference'
 import pandoc from '../utils/pandoc'
 
@@ -54,10 +54,19 @@ const handleResponseForExport = async (e, { type, content, pathname, markdown })
 }
 
 const handleResponseForPrint = e => {
-  const win = BrowserWindow.fromWebContents(e.sender)
-  win.webContents.print({ printBackground: true }, () => {
-    removePrintServiceFromWindow(win)
+  // See GH#749, Electron#16085 and Electron#17523.
+  dialog.showMessageBox({
+    type: 'info',
+    buttons: ['OK'],
+    defaultId: 0,
+    noLink: true,
+    message: 'Printing doesn\'t work',
+    detail: 'Printing is disabled due to an Electron upstream issue. Please export the document as PDF and print the PDF file. We apologize for the inconvenience!'
   })
+  // const win = BrowserWindow.fromWebContents(e.sender)
+  // win.webContents.print({ printBackground: true }, () => {
+  //   removePrintServiceFromWindow(win)
+  // })
 }
 
 const handleResponseForSave = (e, { id, markdown, pathname, options }) => {
@@ -67,13 +76,23 @@ const handleResponseForSave = (e, { id, markdown, pathname, options }) => {
     recommendFilename = 'Untitled'
   }
 
+  // If the file doesn't exist on disk add it to the recently used documents later.
+  const alreadyExistOnDisk = !!pathname
   pathname = pathname || dialog.showSaveDialog(win, {
     defaultPath: getPath('documents') + `/${recommendFilename}.md`
   })
 
   if (pathname && typeof pathname === 'string') {
+    if (!alreadyExistOnDisk) {
+      appMenu.addRecentlyUsedDocument(pathname)
+    }
+
     return writeMarkdownFile(pathname, markdown, options, win)
       .then(() => {
+        if (!alreadyExistOnDisk) {
+          // it's a new created file, need watch
+          appWindow.watcher.watch(win, pathname, 'file')
+        }
         const filename = path.basename(pathname)
         win.webContents.send('AGANI::set-pathname', { id, pathname, filename })
         return id
@@ -120,6 +139,7 @@ const pandocFile = async pathname => {
   try {
     const converter = pandoc(pathname, 'markdown')
     const data = await converter()
+    // TODO: allow to open data also in a new tab instead window.
     appWindow.createWindow(undefined, data)
   } catch (err) {
     log(err)
@@ -168,6 +188,12 @@ ipcMain.on('AGANI::response-file-save-as', (e, { id, markdown, pathname, options
   if (filePath) {
     writeMarkdownFile(filePath, markdown, options, win)
       .then(() => {
+        // need watch file after `save as`
+        if (pathname !== filePath) {
+          appWindow.watcher.watch(win, filePath, 'file')
+          // unWatch the old file.
+          appWindow.watcher.unWatch(win, pathname, 'file')
+        }
         const filename = path.basename(filePath)
         win.webContents.send('AGANI::set-pathname', { id, pathname: filePath, filename })
       })
@@ -206,8 +232,8 @@ ipcMain.on('AGANI::close-window', e => {
 ipcMain.on('AGANI::window::drop', async (e, fileList) => {
   const win = BrowserWindow.fromWebContents(e.sender)
   for (const file of fileList) {
-    if (isMarkdownFile(file)) {
-      appWindow.createWindow(file)
+    if (isMarkdownFileOrLink(file)) {
+      openFileOrFolder(win, file)
       break
     }
     // handle import file
@@ -217,8 +243,8 @@ ipcMain.on('AGANI::window::drop', async (e, fileList) => {
         noticePandocNotFound(win)
       } else {
         pandocFile(file)
-        break
       }
+      break
     }
   }
 })
@@ -271,7 +297,24 @@ ipcMain.on('AGANI::ask-for-open-project-in-sidebar', e => {
     properties: ['openDirectory', 'createDirectory']
   })
   if (pathname && pathname[0]) {
-    appWindow.openProject(win, pathname[0])
+    appWindow.openFolder(win, pathname[0])
+  }
+})
+
+ipcMain.on('AGANI::format-link-click', (e, { data, dirname }) => {
+  if (URL_REG.test(data.href)) {
+    return shell.openExternal(data.href)
+  }
+  let pathname = null
+  if (path.isAbsolute(data.href) && isMarkdownFile(data.href)) {
+    pathname = data.href
+  }
+  if (!path.isAbsolute(data.href) && isMarkdownFile(path.join(dirname, data.href))) {
+    pathname = path.join(dirname, data.href)
+  }
+  if (pathname) {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    return openFileOrFolder(win, pathname)
   }
 })
 
@@ -302,31 +345,41 @@ export const print = win => {
   win.webContents.send('AGANI::print')
 }
 
-export const openFileOrProject = pathname => {
-  if (isFile(pathname) || isDirectory(pathname)) {
-    appWindow.createWindow(pathname)
+export const openFileOrFolder = (win, pathname) => {
+  const resolvedPath = normalizeAndResolvePath(pathname)
+  if (isFile(resolvedPath)) {
+    const { openFilesInNewWindow } = userPreference.getAll()
+    if (openFilesInNewWindow) {
+      appWindow.createWindow(resolvedPath)
+    } else {
+      appWindow.newTab(win, pathname)
+    }
+  } else if (isDirectory(resolvedPath)) {
+    appWindow.createWindow(resolvedPath)
+  } else {
+    console.error(`[ERROR] Cannot open unknown file: "${resolvedPath}"`)
   }
 }
 
-export const openProject = win => {
-  const pathname = dialog.showOpenDialog(win, {
+export const openFolder = win => {
+  const dirList = dialog.showOpenDialog(win, {
     properties: ['openDirectory', 'createDirectory']
   })
-  if (pathname && pathname[0]) {
-    openFileOrProject(pathname[0])
+  if (dirList && dirList[0]) {
+    openFileOrFolder(win, dirList[0])
   }
 }
 
-export const open = win => {
-  const filename = dialog.showOpenDialog(win, {
+export const openFile = win => {
+  const fileList = dialog.showOpenDialog(win, {
     properties: ['openFile'],
     filters: [{
       name: 'text',
       extensions: EXTENSIONS
     }]
   })
-  if (filename && filename[0]) {
-    openFileOrProject(filename[0])
+  if (fileList && fileList[0]) {
+    openFileOrFolder(win, fileList[0])
   }
 }
 
@@ -334,8 +387,14 @@ export const newFile = () => {
   appWindow.createWindow()
 }
 
-export const newTab = win => {
-  win.webContents.send('AGANI::new-tab')
+/**
+ * Creates a new tab.
+ *
+ * @param {BrowserWindow} win Browser window
+ * @param {IMarkdownDocumentRaw} [rawDocument] Optional markdown document. If null a blank tab is created.
+ */
+export const newTab = (win, rawDocument = null) => {
+  win.webContents.send('AGANI::new-tab', rawDocument)
 }
 
 export const closeTab = win => {
@@ -354,7 +413,7 @@ export const autoSave = (menuItem, browserWindow) => {
   const { checked } = menuItem
   userPreference.setItem('autoSave', checked)
     .then(() => {
-      for (const win of appWindow.windows.values()) {
+      for (const { win } of appWindow.windows.values()) {
         win.webContents.send('AGANI::user-preference', { autoSave: checked })
       }
     })

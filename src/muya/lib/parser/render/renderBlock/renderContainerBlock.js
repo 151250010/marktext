@@ -83,9 +83,7 @@ export default function renderContainerBlock (block, cursor, activeBlocks, match
       default:
         break
     }
-    if (block.bulletListItemMarker) {
-      Object.assign(data.dataset, { marker: block.bulletListItemMarker })
-    }
+    Object.assign(data.dataset, { marker: block.bulletMarkerOrDelimiter })
     selector += block.isLooseListItem ? `.${CLASS_OR_ID['AG_LOOSE_LIST_ITEM']}` : `.${CLASS_OR_ID['AG_TIGHT_LIST_ITEM']}`
   }
   if (block.type === 'ol') {
@@ -105,6 +103,9 @@ export default function renderContainerBlock (block, cursor, activeBlocks, match
     Object.assign(data.dataset, { role: functionType })
     selector += PRE_BLOCK_HASH[block.functionType]
   }
-
-  return h(selector, data, block.children.map(child => this.renderBlock(child, cursor, activeBlocks, matches, useCache)))
+  if (!block.parent) {
+    return h(selector, data, [this.renderIcon(block), ...block.children.map(child => this.renderBlock(child, cursor, activeBlocks, matches, useCache))])
+  } else {
+    return h(selector, data, block.children.map(child => this.renderBlock(child, cursor, activeBlocks, matches, useCache)))
+  }
 }

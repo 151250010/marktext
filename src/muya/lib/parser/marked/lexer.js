@@ -1,16 +1,20 @@
-import { normal, gfm, tables } from './blockRules'
-import { options } from './utils'
+import { normal, gfm, tables, pedantic } from './blockRules'
+import options from './options'
+import { splitCells, rtrim } from './utils'
+
 /**
  * Block Lexer
  */
 
 function Lexer (opts) {
   this.tokens = []
-  this.tokens.links = {}
+  this.tokens.links = Object.create(null)
   this.options = Object.assign({}, options, opts)
   this.rules = normal
 
-  if (this.options.gfm) {
+  if (this.options.pedantic) {
+    this.rules = pedantic
+  } else if (this.options.gfm) {
     if (this.options.tables) {
       this.rules = tables
     } else {
@@ -29,6 +33,7 @@ Lexer.prototype.lex = function (src) {
     .replace(/\t/g, '    ')
     .replace(/\u00a0/g, ' ')
     .replace(/\u2424/g, '\n')
+  this.checkFrontmatter = true
   return this.token(src, true)
 }
 
@@ -36,8 +41,9 @@ Lexer.prototype.lex = function (src) {
  * Lexing
  */
 
-Lexer.prototype.token = function (src, top, bq) {
+Lexer.prototype.token = function (src, top) {
   src = src.replace(/^ +$/gm, '')
+
   let loose
   let cap
   let bull
@@ -45,17 +51,21 @@ Lexer.prototype.token = function (src, top, bq) {
   let item
   let space
   let i
+  let tag
   let l
   let checked
-  // Only check front matter at the begining of markdown file
+
+  // Only check front matter at the begining of a markdown file.
+  // Why "checkFrontmatter" and "top"? See note in "blockquote".
   cap = this.rules.frontmatter.exec(src)
-  if (!bq && top && cap) {
+  if (this.checkFrontmatter && top && cap) {
     src = src.substring(cap[0].length)
     this.tokens.push({
       type: 'frontmatter',
       text: cap[1]
     })
   }
+  this.checkFrontmatter = false
 
   while (src) {
     // newline
@@ -77,7 +87,9 @@ Lexer.prototype.token = function (src, top, bq) {
       this.tokens.push({
         type: 'code',
         codeBlockStyle: 'indented',
-        text: !this.options.pedantic ? cap.replace(/\n+$/, '') : cap
+        text: !this.options.pedantic
+          ? rtrim(cap, '\n')
+          : cap
       })
       continue
     }
@@ -100,8 +112,8 @@ Lexer.prototype.token = function (src, top, bq) {
       this.tokens.push({
         type: 'code',
         codeBlockStyle: 'fenced',
-        lang: cap[2],
-        text: cap[3]
+        lang: cap[2] ? cap[2].trim() : cap[2],
+        text: cap[3] || ''
       })
       continue
     }
@@ -121,48 +133,37 @@ Lexer.prototype.token = function (src, top, bq) {
 
     // table no leading pipe (gfm)
     cap = this.rules.nptable.exec(src)
-    if (top && cap) {
-      src = src.substring(cap[0].length)
-
+    if (cap) {
       item = {
         type: 'table',
-        header: cap[1].replace(/^ *| *\| *$/g, '').split(/ *\| */),
+        header: splitCells(cap[1].replace(/^ *| *\| *$/g, '')),
         align: cap[2].replace(/^ *|\| *$/g, '').split(/ *\| */),
-        cells: cap[3].replace(/\n$/, '').split('\n')
+        cells: cap[3] ? cap[3].replace(/\n$/, '').split('\n') : []
       }
 
-      for (i = 0; i < item.align.length; i++) {
-        if (/^ *-+: *$/.test(item.align[i])) {
-          item.align[i] = 'right'
-        } else if (/^ *:-+: *$/.test(item.align[i])) {
-          item.align[i] = 'center'
-        } else if (/^ *:-+ *$/.test(item.align[i])) {
-          item.align[i] = 'left'
-        } else {
-          item.align[i] = null
+      if (item.header.length === item.align.length) {
+        src = src.substring(cap[0].length)
+
+        for (i = 0; i < item.align.length; i++) {
+          if (/^ *-+: *$/.test(item.align[i])) {
+            item.align[i] = 'right'
+          } else if (/^ *:-+: *$/.test(item.align[i])) {
+            item.align[i] = 'center'
+          } else if (/^ *:-+ *$/.test(item.align[i])) {
+            item.align[i] = 'left'
+          } else {
+            item.align[i] = null
+          }
         }
+
+        for (i = 0; i < item.cells.length; i++) {
+          item.cells[i] = splitCells(item.cells[i], item.header.length)
+        }
+
+        this.tokens.push(item)
+
+        continue
       }
-
-      for (i = 0; i < item.cells.length; i++) {
-        item.cells[i] = item.cells[i].split(/ *\| */)
-      }
-
-      this.tokens.push(item)
-
-      continue
-    }
-
-    // lheading
-    cap = this.rules.lheading.exec(src)
-    if (cap) {
-      src = src.substring(cap[0].length)
-      this.tokens.push({
-        type: 'heading',
-        headingStyle: 'setext',
-        depth: cap[2] === '=' ? 1 : 2,
-        text: cap[1]
-      })
-      continue
     }
 
     // hr
@@ -189,7 +190,7 @@ Lexer.prototype.token = function (src, top, bq) {
       // Pass `top` to keep the current
       // "toplevel" state. This is exactly
       // how markdown.pl works.
-      this.token(cap, top, true)
+      this.token(cap, top)
 
       this.tokens.push({
         type: 'blockquote_end'
@@ -198,18 +199,20 @@ Lexer.prototype.token = function (src, top, bq) {
       continue
     }
 
+    // NOTE: Complete list lexer part is a custom implementation based on an older marked.js version.
+
     // list
-    cap = this.rules.tasklist.exec(src) || this.rules.orderlist.exec(src) || this.rules.bulletlist.exec(src)
+    cap = this.rules.list.exec(src)
     if (cap) {
       src = src.substring(cap[0].length)
       bull = cap[2]
-      const ordered = bull.length > 1 && /\d/.test(bull)
+      let isOrdered = bull.length > 1 && /\d{1,9}/.test(bull)
 
       this.tokens.push({
         type: 'list_start',
-        ordered,
-        listType: bull.length > 1 ? (/\d/.test(bull) ? 'order' : 'task') : 'bullet',
-        start: ordered ? +bull : ''
+        ordered: isOrdered,
+        listType: bull.length > 1 ? (/\d{1,9}/.test(bull) ? 'order' : 'task') : 'bullet',
+        start: isOrdered ? +(bull.slice(0, -1)) : ''
       })
 
       let next = false
@@ -228,12 +231,41 @@ Lexer.prototype.token = function (src, top, bq) {
         // Remove the list item's bullet
         // so it is seen as the next token.
         space = item.length
-        item = item.replace(/^ *([*+-]|\d+\.) +/, '')
+        let newBull
+        item = item.replace(/^ *([*+-]|\d+(?:\.|\))) */, function (m, p1) {
+          // Get and remove list item bullet
+          newBull = p1 || bull
+          return ''
+        })
 
-        if (this.options.gfm) {
+        // Changing the bullet or ordered list delimiter starts a new list (CommonMark 264 and 265)
+        //   - unordered, unordered --> bull !== newBull --> new list (e.g "-" --> "*")
+        //   - ordered, ordered --> lastChar !== lastChar --> new list (e.g "." --> ")")
+        //   - else --> new list (e.g. ordered --> unordered)
+        const newIsOrdered = bull.length > 1 && /\d{1,9}/.test(newBull)
+        if (i !== 0 &&
+          ((!isOrdered && !newIsOrdered && bull !== newBull) ||
+          (isOrdered && newIsOrdered && bull.slice(-1) !== newBull.slice(-1)) ||
+          ((isOrdered && !newIsOrdered) || (!isOrdered && newIsOrdered)))) {
+          this.tokens.push({
+            type: 'list_end'
+          })
+
+          // Start a new list
+          bull = newBull
+          isOrdered = newIsOrdered
+          this.tokens.push({
+            type: 'list_start',
+            ordered: isOrdered,
+            listType: bull.length > 1 ? (/\d{1,9}/.test(bull) ? 'order' : 'task') : 'bullet',
+            start: isOrdered ? +(bull.slice(0, -1)) : ''
+          })
+        }
+
+        if (!isOrdered && this.options.gfm) {
           checked = this.rules.checkbox.exec(item)
           if (checked) {
-            checked = checked[1] === 'x'
+            checked = checked[1] === 'x' || checked[1] === 'X'
             item = item.replace(this.rules.checkbox, '')
           } else {
             checked = undefined
@@ -251,9 +283,10 @@ Lexer.prototype.token = function (src, top, bq) {
 
         // Determine whether the next list item belongs here.
         // Backpedal if it does not belong in this list.
-        if (this.options.smartLists && i !== l - 1) {
+        if (i !== l - 1) {
           b = this.rules.bullet.exec(cap[i + 1])[0]
-          if (bull !== b && !(bull.length > 1 && b.length > 1)) {
+          if (bull.length > 1 ? b.length === 1
+            : (b.length > 1 || (this.options.smartLists && b !== bull))) {
             src = cap.slice(i + 1).join('\n') + src
             i = l - 1
           }
@@ -265,17 +298,16 @@ Lexer.prototype.token = function (src, top, bq) {
         } else {
           prevItem = cap[i - 1]
         }
-
         // Determine whether item is loose or not. If previous item is loose
         // this item is also loose.
-        loose = next = next || /^ *([*+-]|\d+\.) +\S+\n\n(?!\s*$)/.test(itemWithBullet)
+        loose = next = next || /^ *([*+-]|\d{1,9}(?:\.|\)))( +\S+\n\n(?!\s*$)|\n\n(?!\s*$))/.test(itemWithBullet)
 
         // Check if previous line ends with a new line.
         if (!loose && (i !== 0 || l > 1) && prevItem.length !== 0 && prevItem.charAt(prevItem.length - 1) === '\n') {
           loose = next = true
         }
 
-        // A list is either loose or tight, so update previous list items.
+        // A list is either loose or tight, so update previous list items but not nested list items.
         if (next && prevNext !== next) {
           for (const index of listItemIndices) {
             this.tokens[index].type = 'loose_item_start'
@@ -288,10 +320,11 @@ Lexer.prototype.token = function (src, top, bq) {
           listItemIndices.push(this.tokens.length)
         }
 
+        const isOrderedListItem = /\d/.test(bull)
         this.tokens.push({
           checked: checked,
-          listItemType: bull.length > 1 ? (/\d/.test(bull) ? 'order' : 'task') : 'bullet',
-          bulletListItemMarker: /\d/.test(bull) ? '' : bull.charAt(0),
+          listItemType: bull.length > 1 ? (isOrderedListItem ? 'order' : 'task') : 'bullet',
+          bulletMarkerOrDelimiter: isOrderedListItem ? bull.slice(-1) : bull.charAt(0),
           type: loose ? 'loose_item_start' : 'list_item_start'
         })
 
@@ -302,7 +335,7 @@ Lexer.prototype.token = function (src, top, bq) {
           })
         } else {
           // Recurse.
-          this.token(item, false, bq)
+          this.token(item, false)
         }
 
         this.tokens.push({
@@ -322,8 +355,11 @@ Lexer.prototype.token = function (src, top, bq) {
     if (cap) {
       src = src.substring(cap[0].length)
       this.tokens.push({
-        type: this.options.sanitize ? 'paragraph' : 'html',
-        pre: !this.options.sanitizer && (cap[1] === 'pre' || cap[1] === 'script' || cap[1] === 'style'),
+        type: this.options.sanitize
+          ? 'paragraph'
+          : 'html',
+        pre: !this.options.sanitizer
+          && (cap[1] === 'pre' || cap[1] === 'script' || cap[1] === 'style'),
         text: cap[0]
       })
       continue
@@ -331,14 +367,19 @@ Lexer.prototype.token = function (src, top, bq) {
 
     // def
     cap = this.rules.def.exec(src)
-    if (!bq && top && cap) {
+    if (top && cap) {
       let text = ''
       do {
         src = src.substring(cap[0].length)
-        this.tokens.links[cap[1].toLowerCase()] = {
-          href: cap[2],
-          title: cap[3]
+        if (cap[3]) cap[3] = cap[3].substring(1, cap[3].length - 1)
+        tag = cap[1].toLowerCase().replace(/\s+/g, ' ')
+        if (!this.tokens.links[tag]) {
+          this.tokens.links[tag] = {
+            href: cap[2],
+            title: cap[3]
+          }
         }
+
         text += cap[0]
         if (cap[0].endsWith('\n\n')) break
         cap = this.rules.def.exec(src)
@@ -356,35 +397,53 @@ Lexer.prototype.token = function (src, top, bq) {
     // table (gfm)
     cap = this.rules.table.exec(src)
     if (cap) {
-      src = src.substring(cap[0].length)
-
       item = {
         type: 'table',
-        header: cap[1].replace(/^ *| *\| *$/g, '').split(/ *\| */),
+        header: splitCells(cap[1].replace(/^ *| *\| *$/g, '')),
         align: cap[2].replace(/^ *|\| *$/g, '').split(/ *\| */),
-        cells: cap[3].replace(/\n$/, '').split('\n')
+        cells: cap[3] ? cap[3].replace(/\n$/, '').split('\n') : []
       }
 
-      for (i = 0; i < item.align.length; i++) {
-        if (/^ *-+: *$/.test(item.align[i])) {
-          item.align[i] = 'right'
-        } else if (/^ *:-+: *$/.test(item.align[i])) {
-          item.align[i] = 'center'
-        } else if (/^ *:-+ *$/.test(item.align[i])) {
-          item.align[i] = 'left'
-        } else {
-          item.align[i] = null
+      if (item.header.length === item.align.length) {
+        src = src.substring(cap[0].length)
+
+        for (i = 0; i < item.align.length; i++) {
+          if (/^ *-+: *$/.test(item.align[i])) {
+            item.align[i] = 'right'
+          } else if (/^ *:-+: *$/.test(item.align[i])) {
+            item.align[i] = 'center'
+          } else if (/^ *:-+ *$/.test(item.align[i])) {
+            item.align[i] = 'left'
+          } else {
+            item.align[i] = null
+          }
         }
+
+        for (i = 0; i < item.cells.length; i++) {
+          item.cells[i] = splitCells(
+            item.cells[i].replace(/^ *\| *| *\| *$/g, ''),
+            item.header.length)
+        }
+
+        this.tokens.push(item)
+
+        continue
       }
+    }
 
-      for (i = 0; i < item.cells.length; i++) {
-        item.cells[i] = item.cells[i]
-          .replace(/^ *\| *| *\| *$/g, '')
-          .split(/ *\| */)
-      }
-
-      this.tokens.push(item)
-
+    // lheading
+    cap = this.rules.lheading.exec(src)
+    if (cap) {
+      const chops = cap[0].trim().split(/\n/)
+      const marker = chops[chops.length - 1]
+      src = src.substring(cap[0].length)
+      this.tokens.push({
+        type: 'heading',
+        headingStyle: 'setext',
+        depth: cap[2] === '=' ? 1 : 2,
+        text: cap[1],
+        marker
+      })
       continue
     }
 

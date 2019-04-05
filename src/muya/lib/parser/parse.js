@@ -1,24 +1,38 @@
 import { beginRules, inlineRules } from './rules'
 import { isLengthEven, union } from '../utils'
-import { punctuation } from '../config'
+import { punctuation, WHITELIST_ATTRIBUTES } from '../config'
 
 const CAN_NEST_RULES = ['strong', 'em', 'link', 'del', 'image', 'a_link'] // image can not nest but it has children
-
+// disallowed html tags in https://github.github.com/gfm/#raw-html
+const disallowedHtmlTag = /(?:title|textarea|style|xmp|iframe|noembed|noframes|script|plaintext)/i
 const validateRules = Object.assign({}, inlineRules)
 delete validateRules.em
 delete validateRules.strong
 delete validateRules['tail_header']
 delete validateRules['backlash']
 
-const getSrcAlt = text => {
-  const SRC_REG = /src\s*=\s*("|')([^\1]+?)\1/
-  const ALT_REG = /alt\s*=\s*("|')([^\1]+?)\1/
-  const srcMatch = SRC_REG.exec(text)
-  const src = srcMatch ? srcMatch[2] : ''
-  const altMatch = ALT_REG.exec(text)
-  const alt = altMatch ? altMatch[2] : ''
+const validWidthAndHeight = value => {
+  if (!/^\d{1,}$/.test(value)) return ''
+  value = parseInt(value)
+  return value >= 0 ? value : ''
+}
 
-  return { src, alt }
+const getAttributes = html => {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html, 'text/html')
+  const target = doc.querySelector('body').firstElementChild
+  if (!target) return null
+  const attrs = {}
+  for (const attr of target.getAttributeNames()) {
+    if (!WHITELIST_ATTRIBUTES.includes(attr)) continue
+    if (/width|height/.test(attr)) {
+      attrs[attr] = validWidthAndHeight(target.getAttribute(attr))
+    } else {
+      attrs[attr] = target.getAttribute(attr)
+    }
+  }
+
+  return attrs
 }
 
 const lowerPriority = (src, offset) => {
@@ -79,7 +93,7 @@ const validateEmphasize = (src, offset, marker, pending) => {
   return lowerPriority(src, offset)
 }
 
-const tokenizerFac = (src, beginRules, inlineRules, pos = 0, top) => {
+const tokenizerFac = (src, beginRules, inlineRules, pos = 0, top, labels) => {
   const tokens = []
   let pending = ''
   let pendingStartPos = pos
@@ -197,7 +211,7 @@ const tokenizerFac = (src, beginRules, inlineRules, pos = 0, top) => {
             range,
             marker,
             parent: tokens,
-            children: tokenizerFac(to[2], undefined, inlineRules, pos + to[1].length, false),
+            children: tokenizerFac(to[2], undefined, inlineRules, pos + to[1].length, false, labels),
             backlash: to[3]
           })
           src = src.substring(to[0].length)
@@ -238,7 +252,7 @@ const tokenizerFac = (src, beginRules, inlineRules, pos = 0, top) => {
             range,
             marker,
             parent: tokens,
-            children: tokenizerFac(to[2], undefined, inlineRules, pos + to[1].length, false),
+            children: tokenizerFac(to[2], undefined, inlineRules, pos + to[1].length, false, labels),
             backlash: to[3]
           })
         }
@@ -287,7 +301,7 @@ const tokenizerFac = (src, beginRules, inlineRules, pos = 0, top) => {
           start: pos,
           end: pos + linkTo[0].length
         },
-        children: tokenizerFac(linkTo[2], undefined, inlineRules, pos + linkTo[1].length, false),
+        children: tokenizerFac(linkTo[2], undefined, inlineRules, pos + linkTo[1].length, false, labels),
         backlash: {
           first: linkTo[3],
           second: linkTo[5]
@@ -300,9 +314,8 @@ const tokenizerFac = (src, beginRules, inlineRules, pos = 0, top) => {
     }
 
     const rLinkTo = inlineRules['reference_link'].exec(src)
-    if (rLinkTo && isLengthEven(rLinkTo[2]) && isLengthEven(rLinkTo[4])) {
+    if (rLinkTo && labels.has(rLinkTo[3] || rLinkTo[1]) && isLengthEven(rLinkTo[2]) && isLengthEven(rLinkTo[4])) {
       pushPending()
-
       tokens.push({
         type: 'reference_link',
         raw: rLinkTo[0],
@@ -318,7 +331,7 @@ const tokenizerFac = (src, beginRules, inlineRules, pos = 0, top) => {
           start: pos,
           end: pos + rLinkTo[0].length
         },
-        children: tokenizerFac(rLinkTo[1], undefined, inlineRules, pos + 1, false)
+        children: tokenizerFac(rLinkTo[1], undefined, inlineRules, pos + 1, false, labels)
       })
 
       src = src.substring(rLinkTo[0].length)
@@ -352,55 +365,6 @@ const tokenizerFac = (src, beginRules, inlineRules, pos = 0, top) => {
       continue
     }
 
-    // a_link `<a href="url">Anchor</a>`
-    const aLinkTo = inlineRules['a_link'].exec(src)
-    if (aLinkTo) {
-      pushPending()
-      tokens.push({
-        type: 'a_link',
-        raw: aLinkTo[0],
-        href: aLinkTo[3],
-        openTag: aLinkTo[1],
-        closeTag: aLinkTo[5],
-        anchor: aLinkTo[4],
-        parent: tokens,
-        range: {
-          start: pos,
-          end: pos + aLinkTo[0].length
-        },
-        children: tokenizerFac(aLinkTo[4], undefined, inlineRules, pos + aLinkTo[1].length, false)
-      })
-
-      src = src.substring(aLinkTo[0].length)
-      pos = pos + aLinkTo[0].length
-      continue
-    }
-
-    // html-image
-    const htmlImageTo = inlineRules['html_image'].exec(src)
-    if (htmlImageTo) {
-      const rawAttr = htmlImageTo[2]
-      const { src: imageSrc, alt } = getSrcAlt(rawAttr)
-      if (imageSrc) {
-        pushPending()
-        tokens.push({
-          type: 'html_image',
-          raw: htmlImageTo[0],
-          tag: htmlImageTo[1],
-          parent: tokens,
-          src: imageSrc,
-          alt,
-          range: {
-            start: pos,
-            end: pos + htmlImageTo[0].length
-          }
-        })
-        src = src.substring(htmlImageTo[0].length)
-        pos = pos + htmlImageTo[0].length
-        continue
-      }
-    }
-
     // html escape
     const htmlEscapeTo = inlineRules['html_escape'].exec(src)
     if (htmlEscapeTo) {
@@ -423,14 +387,43 @@ const tokenizerFac = (src, beginRules, inlineRules, pos = 0, top) => {
 
     // html-tag
     const htmlTo = inlineRules['html_tag'].exec(src)
-    if (htmlTo) {
+    let attrs
+    // handle comment
+    if (htmlTo && htmlTo[1] && !htmlTo[3]) {
       const len = htmlTo[0].length
       pushPending()
       tokens.push({
         type: 'html_tag',
         raw: htmlTo[0],
-        tag: htmlTo[1],
+        tag: '<!---->',
+        openTag: htmlTo[1],
         parent: tokens,
+        attrs: {},
+        range: {
+          start: pos,
+          end: pos + len
+        }
+      })
+      src = src.substring(len)
+      pos = pos + len
+      continue
+    }
+    if (htmlTo && !(disallowedHtmlTag.test(htmlTo[3])) && (attrs = getAttributes(htmlTo[0]))) {
+      const tag = htmlTo[3]
+      const html = htmlTo[0]
+      const len = htmlTo[0].length
+
+      pushPending()
+      tokens.push({
+        type: 'html_tag',
+        raw: html,
+        tag,
+        openTag: htmlTo[2],
+        closeTag: htmlTo[5],
+        parent: tokens,
+        attrs,
+        content: htmlTo[4],
+        children: htmlTo[4] ? tokenizerFac(htmlTo[4], undefined, inlineRules, pos + htmlTo[2].length, false, labels) : '',
         range: {
           start: pos,
           end: pos + len
@@ -508,8 +501,8 @@ const tokenizerFac = (src, beginRules, inlineRules, pos = 0, top) => {
   return tokens
 }
 
-export const tokenizer = (src, highlights = [], hasBeginRules = true) => {
-  const tokens = tokenizerFac(src, hasBeginRules ? beginRules : null, inlineRules, 0, true)
+export const tokenizer = (src, highlights = [], hasBeginRules = true, labels = new Map()) => {
+  const tokens = tokenizerFac(src, hasBeginRules ? beginRules : null, inlineRules, 0, true, labels)
   const postTokenizer = tokens => {
     for (const token of tokens) {
       for (const light of highlights) {

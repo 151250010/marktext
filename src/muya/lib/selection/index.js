@@ -420,10 +420,10 @@ class Selection {
       let count = 0
       for (i = 0; i < len; i++) {
         const child = childNodes[i]
-        if (count + getTextContent(child, [ CLASS_OR_ID['AG_MATH_RENDER'] ]).length >= offset) {
+        if (count + getTextContent(child, [ CLASS_OR_ID['AG_MATH_RENDER'], CLASS_OR_ID['AG_RUBY_RENDER'] ]).length >= offset) {
           return getNodeAndOffset(child, offset - count)
         } else {
-          count += getTextContent(child, [ CLASS_OR_ID['AG_MATH_RENDER'] ]).length
+          count += getTextContent(child, [ CLASS_OR_ID['AG_MATH_RENDER'], CLASS_OR_ID['AG_RUBY_RENDER'] ]).length
         }
       }
       return { node, offset }
@@ -433,12 +433,19 @@ class Selection {
     let { node: endNode, offset: endOffset } = getNodeAndOffset(endParagraph, end.offset)
     startOffset = Math.min(startOffset, startNode.textContent.length)
     endOffset = Math.min(endOffset, endNode.textContent.length)
-
     this.select(startNode, startOffset, endNode, endOffset)
   }
 
   getCursorRange () {
     let { anchorNode, anchorOffset, focusNode, focusOffset } = this.doc.getSelection()
+    let startParagraph = findNearestParagraph(anchorNode)
+    let endParagraph = findNearestParagraph(focusNode)
+    if (!startParagraph || !endParagraph) {
+      return {
+        start: null,
+        end: null
+      }
+    }
 
     // when the first paragraph is task list, press ctrl + a, then press backspace will cause bug
     // use code bellow to fix the bug
@@ -455,9 +462,6 @@ class Selection {
       anchorNode = findFirstTextNode(anchorNode)
     }
 
-    let startParagraph = findNearestParagraph(anchorNode)
-    let endParagraph = findNearestParagraph(focusNode)
-
     const getOffsetOfParagraph = (node, paragraph) => {
       let offset = 0
       let preSibling = node
@@ -467,7 +471,7 @@ class Selection {
       do {
         preSibling = preSibling.previousSibling
         if (preSibling) {
-          offset += getTextContent(preSibling, [ CLASS_OR_ID['AG_MATH_RENDER'] ]).length
+          offset += getTextContent(preSibling, [ CLASS_OR_ID['AG_MATH_RENDER'], CLASS_OR_ID['AG_RUBY_RENDER'] ]).length
         }
       } while (preSibling)
       return (node === paragraph || node.parentNode === paragraph)

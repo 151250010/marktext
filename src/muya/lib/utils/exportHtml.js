@@ -17,6 +17,7 @@ class ExportHtml {
   constructor (markdown) {
     this.markdown = markdown
   }
+
   // render pure html by marked
   renderHtml () {
     return marked(this.markdown, {
@@ -48,6 +49,7 @@ class ExportHtml {
       }
     })
   }
+
   /**
    * Get HTML with style
    *
@@ -57,7 +59,7 @@ class ExportHtml {
   generate (title = '', printOptimization = false) {
     // WORKAROUND: Hide Prism.js style when exporting or printing. Otherwise the background color is white in the dark theme.
     const highlightCssStyle = printOptimization ? `@media print { ${highlightCss} }` : highlightCss
-    const html = this.renderHtml()
+    const html = sanitize(this.renderHtml(), EXPORT_DOMPURIFY_CONFIG)
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -83,6 +85,12 @@ class ExportHtml {
     }
     .markdown-body table {
       display: table;
+    }
+    .markdown-body li.task-list-item {
+      list-style-type: none;
+    }
+    .markdown-body li > [type=checkbox] {
+      margin: 0 0 0 -1.3em;
     }
     .markdown-body input[type="checkbox"] ~ p {
       margin-top: 0;

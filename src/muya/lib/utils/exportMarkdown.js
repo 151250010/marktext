@@ -23,11 +23,17 @@ class ExportMarkdown {
 
   translateBlocks2Markdown (blocks, indent = '') {
     const result = []
+    // helper for CommonMark 264
+    let lastListBullet = ''
 
     for (const block of blocks) {
+      if (block.type !== 'ul' && block.type !== 'ol') {
+        lastListBullet = ''
+      }
+
       switch (block.type) {
         case 'p': {
-          this.insertLineBreak(result, indent, true)
+          this.insertLineBreak(result, indent)
           result.push(this.translateBlocks2Markdown(block.children, indent))
           break
         }
@@ -36,7 +42,7 @@ class ExportMarkdown {
           break
         }
         case 'hr': {
-          this.insertLineBreak(result, indent, true)
+          this.insertLineBreak(result, indent)
           result.push(this.normalizeParagraphText(block, indent))
           break
         }
@@ -46,12 +52,12 @@ class ExportMarkdown {
         case 'h4':
         case 'h5':
         case 'h6': {
-          this.insertLineBreak(result, indent, true)
+          this.insertLineBreak(result, indent)
           result.push(this.normalizeHeaderText(block, indent))
           break
         }
         case 'figure': {
-          this.insertLineBreak(result, indent, true)
+          this.insertLineBreak(result, indent)
           switch (block.functionType) {
             case 'table': {
               const table = block.children[1]
@@ -81,27 +87,45 @@ class ExportMarkdown {
 
           // helper variable to correct the first tight item in a nested list
           this.isLooseParentList = insertNewLine
-
-          this.insertLineBreak(result, indent, insertNewLine)
+          if (insertNewLine) {
+            this.insertLineBreak(result, indent)
+          }
           result.push(this.normalizeListItem(block, indent))
           this.isLooseParentList = true
           break
         }
         case 'ul': {
-          const insertNewLine = this.isLooseParentList
+          let insertNewLine = this.isLooseParentList
           this.isLooseParentList = true
 
-          this.insertLineBreak(result, indent, insertNewLine)
+          // Start a new list without separation due changing the bullet or ordered list delimiter starts a new list.
+          const { bulletMarkerOrDelimiter } = block.children[0]
+          if (lastListBullet && lastListBullet !== bulletMarkerOrDelimiter) {
+            insertNewLine = false
+          }
+          lastListBullet = bulletMarkerOrDelimiter
+          if (insertNewLine) {
+            this.insertLineBreak(result, indent)
+          }
+
           this.listType.push({ type: 'ul' })
           result.push(this.normalizeList(block, indent))
           this.listType.pop()
           break
         }
         case 'ol': {
-          const insertNewLine = this.isLooseParentList
+          let insertNewLine = this.isLooseParentList
           this.isLooseParentList = true
 
-          this.insertLineBreak(result, indent, insertNewLine)
+          // Start a new list without separation due changing the bullet or ordered list delimiter starts a new list.
+          const { bulletMarkerOrDelimiter } = block.children[0]
+          if (lastListBullet && lastListBullet !== bulletMarkerOrDelimiter) {
+            insertNewLine = false
+          }
+          lastListBullet = bulletMarkerOrDelimiter
+          if (insertNewLine) {
+            this.insertLineBreak(result, indent)
+          }
           const listCount = block.start !== undefined ? block.start : 1
           this.listType.push({ type: 'ol', listCount })
           result.push(this.normalizeList(block, indent))
@@ -109,7 +133,7 @@ class ExportMarkdown {
           break
         }
         case 'pre': {
-          this.insertLineBreak(result, indent, true)
+          this.insertLineBreak(result, indent)
           if (block.functionType === 'frontmatter') {
             result.push(this.normalizeFrontMatter(block, indent))
           } else {
@@ -118,7 +142,7 @@ class ExportMarkdown {
           break
         }
         case 'blockquote': {
-          this.insertLineBreak(result, indent, true)
+          this.insertLineBreak(result, indent)
           result.push(this.normalizeBlockquote(block, indent))
           break
         }
@@ -131,14 +155,9 @@ class ExportMarkdown {
     return result.join('')
   }
 
-  insertLineBreak (result, indent, insertNewLine) {
+  insertLineBreak (result, indent) {
     if (!result.length) return
-    const newLine = insertNewLine ? '\n' : ''
-    if (/\S/.test(indent)) {
-      result.push(`${indent}${newLine}`)
-    } else if (insertNewLine) {
-      result.push(newLine)
-    }
+    result.push(`${indent}\n`)
   }
 
   normalizeParagraphText (block, indent) {
@@ -146,17 +165,13 @@ class ExportMarkdown {
   }
 
   normalizeHeaderText (block, indent) {
-    const { headingStyle } = block
-    const match = block.text.match(/(#{1,6})(.*)/)
+    const { headingStyle, marker } = block
     if (headingStyle === 'atx') {
+      const match = block.text.match(/(#{1,6})(.*)/)
       const text = `${match[1]} ${match[2].trim()}`
       return `${indent}${text}\n`
     } else if (headingStyle === 'setext') {
-      const level = match[1].length
-      if (level !== 1 && level !== 2) {
-        console.error(`setext heading only have h1 or h2 but we got a heading h${level}`)
-      }
-      return `${indent}${match[2].trim()}\n${indent}${level === 1 ? '===' : '---'}\n`
+      return `${indent}${block.text}\n${indent}${marker.trim()}\n`
     }
   }
 
@@ -178,11 +193,11 @@ class ExportMarkdown {
 
   normalizeMultipleMath (block, /* figure */ indent) {
     const result = []
-    result.push('$$\n')
+    result.push(`${indent}$$\n`)
     for (const line of block.children[0].children[0].children) {
-      result.push(`${line.text}\n`)
+      result.push(`${indent}${line.text}\n`)
     }
-    result.push('$$\n')
+    result.push(`${indent}$$\n`)
     return result.join('')
   }
 
@@ -287,18 +302,19 @@ class ExportMarkdown {
   normalizeListItem (block, indent) {
     const result = []
     const listInfo = this.listType[this.listType.length - 1]
-    let { children, bulletListItemMarker } = block
+    let { children, bulletMarkerOrDelimiter } = block
     let itemMarker
 
     if (listInfo.type === 'ul') {
-      itemMarker = bulletListItemMarker ? `${bulletListItemMarker} ` : '- '
+      itemMarker = bulletMarkerOrDelimiter ? `${bulletMarkerOrDelimiter} ` : '- '
       if (block.listItemType === 'task') {
         const firstChild = children[0]
         itemMarker += firstChild.checked ? '[x] ' : '[ ] '
         children = children.slice(1)
       }
     } else {
-      itemMarker = `${listInfo.listCount++}. `
+      const delimiter = bulletMarkerOrDelimiter ? bulletMarkerOrDelimiter : '.'
+      itemMarker = `${listInfo.listCount++}${delimiter} `
     }
 
     const newIndent = indent + ' '.repeat(itemMarker.length)

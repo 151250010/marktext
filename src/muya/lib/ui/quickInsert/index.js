@@ -44,37 +44,32 @@ class QuickInsert extends BaseScrollFloat {
         const titleVnode = h('div.title', key.toUpperCase())
         const items = []
         for (const item of _renderObj[key]) {
-          const { title, subTitle, label, icon } = item
-          const iconVnode = h('div.icon-container', h('img', {
-            attrs: {
-              src: `.${icon.url}`
-            }
-          })
-            // h('svg', {
-            //   attrs: {
-            //     viewBox: icon.viewBox,
-            //     'aria-hidden': 'true'
-            //   },
-            //   style: {
-            //     fill: color
-            //   },
-            //   hook: {
-            //     prepatch (oldvnode, vnode) {
-            //       // cheat snabbdom that the pre block is changed!!!
-            //       oldvnode.children = []
-            //       oldvnode.elm.innerHTML = ''
-            //     }
-            //   }
-            // }, h('use', {
-            //   attrs: {
-            //     'xlink:href': icon.url
-            //   }
-            // }))
+          const { title, subTitle, label, icon, shortCut } = item
+          const iconVnode = h('div.icon-container', h('svg', {
+              attrs: {
+                viewBox: icon.viewBox,
+                'aria-hidden': 'true'
+              },
+              hook: {
+                prepatch (oldvnode, vnode) {
+                  // cheat snabbdom that the pre block is changed!!!
+                  oldvnode.children = []
+                  oldvnode.elm.innerHTML = ''
+                }
+              }
+            }, h('use', {
+              attrs: {
+                'xlink:href': icon.url
+              }
+            }))
           )
 
           const description = h('div.description', [
             h('div.big-title', title),
             h('div.sub-title', subTitle)
+          ])
+          const shortCutVnode = h('div.short-cut', [
+            h('span', shortCut)
           ])
           const selector = activeItem.label === label ? 'div.item.active' : 'div.item'
           items.push(h(selector, {
@@ -84,7 +79,7 @@ class QuickInsert extends BaseScrollFloat {
                 this.selectItem(item)
               }
             }
-          }, [iconVnode, description]))
+          }, [iconVnode, description, shortCutVnode]))
         }
 
         return h('section', [titleVnode, ...items])

@@ -1,18 +1,65 @@
-import { THEME_LINK_ID, COMMON_STYLE_ID, DEFAULT_CODE_FONT_FAMILY } from '../config'
+import { THEME_STYLE_ID, COMMON_STYLE_ID, DEFAULT_CODE_FONT_FAMILY, oneDarkThemes, railscastsThemes } from '../config'
+import { dark, graphite, materialDark, oneDark, ulysses } from './themeColor'
+
+const patchTheme = css => {
+  return `@media not print {\n${css}\n}`
+}
 
 export const addThemeStyle = theme => {
-  const href = process.env.NODE_ENV !== 'production'
-    ? `./src/muya/themes/${theme}.css`
-    : `./static/themes/${theme}.css`
+  const isCmRailscasts = railscastsThemes.includes(theme)
+  const isCmOneDark = oneDarkThemes.includes(theme)
+  const isDarkTheme = isCmOneDark || isCmRailscasts
+  let themeStyleEle = document.querySelector(`#${THEME_STYLE_ID}`)
+  if (!themeStyleEle) {
+    themeStyleEle = document.createElement('style')
+    themeStyleEle.id = THEME_STYLE_ID
+    document.head.appendChild(themeStyleEle)
+  }
 
-    let link = document.querySelector(`#${THEME_LINK_ID}`)
-    if (!link) {
-      link = document.createElement('link')
-      link.setAttribute('rel', 'stylesheet')
-      link.id = THEME_LINK_ID
-      document.head.appendChild(link)
+  switch (theme) {
+    case 'light':
+      themeStyleEle.innerHTML = ''
+      break
+    case 'dark':
+      themeStyleEle.innerHTML = patchTheme(dark())
+      break
+    case 'material-dark':
+      themeStyleEle.innerHTML = patchTheme(materialDark())
+      break
+    case 'ulysses':
+      themeStyleEle.innerHTML = patchTheme(ulysses())
+      break
+    case 'graphite':
+      themeStyleEle.innerHTML = patchTheme(graphite())
+      break
+    case 'one-dark':
+      themeStyleEle.innerHTML = patchTheme(oneDark())
+      break
+    default:
+      console.log('unknown theme')
+      break
+  }
+
+  // workaround: use dark icons
+  document.body.classList.remove('dark')
+  if (isDarkTheme) {
+    document.body.classList.add('dark')
+  }
+
+  // change CodeMirror theme
+  const cm = document.querySelector('.CodeMirror')
+  if (cm) {
+    cm.classList.remove('cm-s-default')
+    cm.classList.remove('cm-s-one-dark')
+    cm.classList.remove('cm-s-railscasts')
+    if (isCmOneDark) {
+      cm.classList.add('cm-s-one-dark')
+    } else if (isCmRailscasts) {
+      cm.classList.add('cm-s-railscasts')
+    } else {
+      cm.classList.add('cm-s-default')
     }
-    link.href = href
+  }
 }
 
 export const addCommonStyle = style => {

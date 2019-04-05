@@ -1,7 +1,7 @@
 <template>
   <div
     class="title-bar"
-    :class="[{ 'active': active }, theme, { 'frameless': platform !== 'darwin' }]"
+    :class="[{ 'active': active }, { 'tabs-visible': showTabBar }, { 'frameless': titleBarStyle === 'custom' }, { 'isOsx': platform === 'darwin' }]"
   >
     <div class="title">
       <span v-if="!filename">Mark Text</span>
@@ -15,27 +15,51 @@
             <use xlink:href="#icon-arrow-right"></use>
           </svg>
         </span>
-        <span @click="rename" class="filename">{{ filename }}</span>
+        <span
+          class="filename"
+          :class="{'isOsx': platform === 'darwin'}"
+          @click="rename"
+        >
+          {{ filename }}
+        </span>
         <span class="save-dot" :class="{'show': !isSaved}"></span>
       </span>
     </div>
-    <div :class="platform !== 'darwin' ? 'left-toolbar title-no-drag' : 'right-toolbar'">
+    <div :class="titleBarStyle === 'custom' ? 'left-toolbar title-no-drag' : 'right-toolbar'">
       <div
-        v-if="platform !== 'darwin'"
+        v-if="titleBarStyle === 'custom'"
         class="frameless-titlebar-menu title-no-drag"
         @click.stop="handleMenuClick"
       >&#9776;</div>
-      <div
+      <el-tooltip
         v-if="wordCount"
-        class="word-count"
-        :class="[{ 'title-no-drag': platform !== 'darwin' }]"
-        @click.stop="handleWordClick"
-      >{{ `${HASH[show]} ${wordCount[show]}` }}</div>
+        class="item"
+        :content="`${wordCount[show]} ${HASH[show].full + (wordCount[show] > 1 ? 's' : '')}`"
+        placement="bottom-end"
+      >
+        <div slot="content">
+          <div class="title-item">
+            <span class="front">Words:</span><span class="text">{{wordCount['word']}}</span>
+          </div>
+          <div class="title-item">
+            <span class="front">Characters:</span><span class="text">{{wordCount['character']}}</span>
+          </div>
+          <div class="title-item">
+            <span class="front">Paragraph:</span><span class="text">{{wordCount['paragraph']}}</span>
+          </div>
+        </div>
+        <div
+          v-if="wordCount"
+          class="word-count"
+          :class="[{ 'title-no-drag': platform !== 'darwin' }]"
+          @click.stop="handleWordClick"
+        >{{ `${HASH[show].short} ${wordCount[show]}` }}</div>
+      </el-tooltip>
     </div>
     <div
-      v-if="platform !== 'darwin'"
+      v-if="titleBarStyle === 'custom' && !isFullScreen"
       class="right-toolbar"
-      :class="[{ 'title-no-drag': platform !== 'darwin' }]"
+      :class="[{ 'title-no-drag': titleBarStyle === 'custom' }]"
     >
       <div class="frameless-titlebar-button frameless-titlebar-close" @click.stop="handleCloseClick">
         <div>
@@ -65,21 +89,36 @@
 
 <script>
   import { remote } from 'electron'
+  import { mapState } from 'vuex'
   import { minimizePath, restorePath, maximizePath, closePath } from '../assets/window-controls.js'
+  import { PATH_SEPARATOR } from '../config'
 
   export default {
     data () {
       this.HASH = {
-        'word': 'W',
-        'character': 'C',
-        'paragraph': 'P',
-        'all': 'A'
+        'word': {
+          short: 'W',
+          full: 'word'
+        },
+        'character': {
+          short: 'C',
+          full: 'character'
+        },
+        'paragraph': {
+          short: 'P',
+          full: 'paragraph'
+        },
+        'all': {
+          short: 'A',
+          full: '(with space)character'
+        }
       }
       this.windowIconMinimize = minimizePath
       this.windowIconRestore = restorePath
       this.windowIconMaximize = maximizePath
       this.windowIconClose = closePath
       return {
+        isFullScreen: remote.getCurrentWindow().isFullScreen(),
         isMaximized: remote.getCurrentWindow().isMaximized() || remote.getCurrentWindow().isFullScreen(),
         show: 'word'
       }
@@ -96,14 +135,17 @@
       pathname: String,
       active: Boolean,
       wordCount: Object,
-      theme: String,
       platform: String,
       isSaved: Boolean
     },
     computed: {
+      ...mapState({
+        'titleBarStyle': state => state.preferences.titleBarStyle,
+        'showTabBar': state => state.layout.showTabBar
+      }),
       paths () {
         if (!this.pathname) return []
-        const pathnameToken = this.pathname.split('/').filter(i => i)
+        const pathnameToken = this.pathname.split(PATH_SEPARATOR).filter(i => i)
         return pathnameToken.slice(0, pathnameToken.length - 1).slice(-3)
       }
     },
@@ -144,15 +186,22 @@
       },
 
       handleMenuClick () {
+        let offsetX = 23
+        const elems = document.getElementsByClassName('side-bar')
+        if (elems) {
+          offsetX += elems[0].clientWidth
+        }
+
         const win = remote.getCurrentWindow()
         remote
           .Menu
           .getApplicationMenu()
-          .popup({ window: win, x: 23, y: 20 })
+          .popup({ window: win, x: offsetX, y: 20 })
       },
 
       handleWindowStateChanged () {
-        this.isMaximized = remote.getCurrentWindow().isMaximized() || remote.getCurrentWindow().isFullScreen()
+        this.isFullScreen = remote.getCurrentWindow().isFullScreen()
+        this.isMaximized = remote.getCurrentWindow().isMaximized() || this.isFullScreen
       },
 
       rename () {
@@ -174,20 +223,20 @@
   .title-bar {
     -webkit-app-region: drag;
     user-select: none;
+    background: var(--editorBgColor);
     width: 100%;
     height: var(--titleBarHeight);
     box-sizing: border-box;
-    color: #F2F6FC;
-    position: fixed;
+    color: var(--editorColor50);
+    position: absolute;
     top: 0;
-    left: 0;
     right: 0;
-    z-index: 1;
+    z-index: 2;
     transition: color .4s ease-in-out;
     cursor: default;
   }
   .active {
-    color: #909399;
+    color: var(--editorColor);
   }
   img {
     height: 90%;
@@ -214,9 +263,17 @@
       -webkit-app-region: no-drag;
     }
   }
+  div.title > span {
+    /* Workaround for GH#339 */
+    display: block;
+    direction: rtl;
+    overflow: hidden;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
 
-  .title-bar:not(.frameless) .title .filename:hover {
-    color: var(--primary);
+  .title-bar .title .filename.isOsx:hover {
+    color: var(--themeColor);
   }
 
   .active .save-dot {
@@ -225,7 +282,7 @@
     height: 7px;
     display: inline-block;
     border-radius: 50%;
-    background: var(--warning);
+    background: var(--themeColor);
     opacity: .7;
     visibility: hidden;
   }
@@ -233,11 +290,9 @@
     visibility: visible;
   }
   .title:hover {
-    color: #303133;
+    color: var(sideBarTitleColor);
   }
-  .title:hover .save-dot {
-    background: var(--warning);
-  }
+
   .right-toolbar {
     padding: 0 10px;
     height: 100%;
@@ -246,6 +301,7 @@
     right: 0;
     width: 100px;
     display: flex;
+    align-items: center;
     flex-direction: row-reverse;
   }
   .left-toolbar {
@@ -261,20 +317,19 @@
   .word-count {
     cursor: pointer;
     font-size: 14px;
-    color: #F2F6FC;
-    height: 17px;
-    line-height: 17px;
-    margin-top: 4px;
-    padding: 1px 5px;
-    border-radius: 1px;
+    color: var(--editorColor30);
+    height: 20px;
+    text-align: center;
+    line-height: 24px;
+    padding: 0px 5px;
+    box-sizing: border-box;
+    border-radius: 4px;
     transition: all .25s ease-in-out;
   }
-  .active .word-count {
-    color: #DCDFE6;
-  }
+
   .word-count:hover {
-    background: #F2F6FC;
-    color: #606266;
+    background: var(--sideBarBgColor);
+    color: var(--sideBarTitleColor);
   }
   .title-no-drag {
     -webkit-app-region: no-drag;
@@ -294,7 +349,7 @@
     transform: translateX(-50%) translateY(-50%);
   }
   .frameless-titlebar-menu {
-    color: #606266;
+    color: var(--sideBarColor);
   }
   .frameless-titlebar-close:hover {
     background-color: rgb(228, 79, 79);
@@ -309,26 +364,19 @@
   .frameless-titlebar-close:hover svg {
     fill: #ffffff
   }
-  /* css for dark theme */
-  .dark {
-    background: var(--darkBgColor);
-    color: #909399;
-  }
-  .dark .title:hover {
-    color: #F2F6FC;
-  }
-  .dark .word-count:hover {
-    background: rgb(71, 72, 66);
-    color: #C0C4CC;
-  }
-  .dark .frameless-titlebar-button svg {
-    fill: #909399
-  }
-  .dark .frameless-titlebar-close:hover svg {
-    fill: #ffffff
-  }
-  /* exclude titlebar so we can apply a custom sidebar background color */
-  .title-bar.dark {
-    background: transparent;
-  }
 </style>
+
+<style>
+.title-item {
+  height: 28px;
+  line-height: 28px;
+  & .front {
+    color: var(--editorColor50);
+  }
+  & .text {
+    margin-left: 10px;
+    color: var(--editorColor30);
+  }
+}
+</style>
+

@@ -2,30 +2,25 @@ import { clipboard, ipcRenderer, shell } from 'electron'
 import path from 'path'
 import bus from '../bus'
 import { hasKeys } from '../util'
-import { getOptionsFromState, getSingleFileState, getBlankFileState } from './help'
+import listToTree from '../util/listToTree'
+import { createDocumentState, getOptionsFromState, getSingleFileState, getBlankFileState } from './help'
 import notice from '../services/notification'
-
-// HACK: When rewriting muya, create and update muya's TOC during heading parsing and pass it to the renderer process.
-import { getTocFromMarkdown } from 'muya/lib/utils/dirtyToc'
 
 const state = {
   lineEnding: 'lf',
   currentFile: {},
   tabs: [],
-  textDirection: 'ltr'
-}
-
-const getters = {
-  toc: state => {
-    const { markdown } = state.currentFile
-    return getTocFromMarkdown(markdown)
-  }
+  textDirection: 'ltr',
+  toc: []
 }
 
 const mutations = {
   // set search key and matches also index
   SET_SEARCH (state, value) {
     state.currentFile.searchMatches = value
+  },
+  SET_TOC (state, toc) {
+    state.toc = listToTree(toc)
   },
   SET_CURRENT_FILE (state, currentFile) {
     const oldCurrentFile = state.currentFile
@@ -49,9 +44,39 @@ const mutations = {
       const fileState = state.tabs[index] || state.tabs[index - 1] || {}
       state.currentFile = fileState
       if (typeof fileState.markdown === 'string') {
-        const { markdown, cursor, history } = fileState
+        const { markdown, cursor, history, pathname } = fileState
+        window.DIRNAME = pathname ? path.dirname(pathname) : ''
         bus.$emit('file-changed', { markdown, cursor, renderCursor: true, history })
       }
+    }
+  },
+  LOAD_CHANGE (state, change) {
+    const { tabs, currentFile } = state
+    const { data, pathname } = change
+    const { isMixedLineEndings, lineEnding, adjustLineEndingOnSave, isUtf8BomEncoded, markdown, textDirection, filename } = data
+    const options = { isUtf8BomEncoded, lineEnding, adjustLineEndingOnSave, textDirection }
+    const fileState = getSingleFileState({ markdown, filename, pathname, options })
+    if (isMixedLineEndings) {
+      notice.notify({
+        title: 'Line Ending',
+        message: `${filename} has mixed line endings which are automatically normalized to ${lineEnding.toUpperCase()}.`,
+        type: 'primary',
+        time: 20000,
+        showConfirm: false
+      }) 
+    }
+    for (const tab of tabs) {
+      if (tab.pathname === pathname) {
+        Object.assign(tab, fileState)
+        break
+      }
+    }
+    state.tabs = tabs
+    if (pathname === currentFile.pathname) {
+      Object.assign(currentFile, fileState)
+      state.currentFile = currentFile
+      const { cursor, history } = currentFile
+      bus.$emit('file-changed', { markdown, cursor, renderCursor: true, history })
     }
   },
   SET_PATHNAME (state, file) {
@@ -116,13 +141,23 @@ const mutations = {
   CLOSE_TABS (state, arr) {
     arr.forEach(id => {
       const index = state.tabs.findIndex(f => f.id === id)
+      const { pathname } = state.tabs.find(f => f.id === id)
+      if (pathname) {
+        // close tab and unwatch this file
+        ipcRenderer.send('AGANI::file-watch', { pathname, watch: false })
+      }
+
       state.tabs.splice(index, 1)
-      if (state.currentFile.id === id) state.currentFile = {}
+      if (state.currentFile.id === id) {
+        state.currentFile = {}
+        window.DIRNAME = ''
+      }
     })
     if (!state.currentFile.id && state.tabs.length) {
       state.currentFile = state.tabs[0]
       if (typeof state.currentFile.markdown === 'string') {
-        const { markdown, cursor, history } = state.currentFile
+        const { markdown, cursor, history, pathname } = state.currentFile
+        window.DIRNAME = pathname ? path.dirname(pathname) : ''
         bus.$emit('file-changed', { markdown, cursor, renderCursor: true, history })
       }
     }
@@ -151,6 +186,9 @@ const actions = {
   ASK_FOR_INSERT_IMAGE ({ commit }, type) {
     ipcRenderer.send('AGANI::ask-for-insert-image', type)
   },
+  FORMAT_LINK_CLICK ({ commit }, { data, dirname }) {
+    ipcRenderer.send('AGANI::format-link-click', { data, dirname })
+  },
   // image path auto complement
   ASK_FOR_IMAGE_AUTO_PATH ({ commit, state }, src) {
     const { pathname } = state.currentFile
@@ -175,8 +213,11 @@ const actions = {
       })
   },
 
-  REMOVE_FILE_IN_TABS ({ commit }, file) {
+  REMOVE_FILE_IN_TABS ({ commit, dispatch }, file) {
     commit('REMOVE_FILE_WITHIN_TABS', file)
+    // unwatch this file
+    const { pathname } = file
+    dispatch('ASK_FILE_WATCH', { pathname, watch: false })
   },
 
   // need update line ending when change between windows.
@@ -357,8 +398,14 @@ const actions = {
   },
 
   LISTEN_FOR_NEW_TAB ({ dispatch }) {
-    ipcRenderer.on('AGANI::new-tab', e => {
-      dispatch('NEW_BLANK_FILE')
+    ipcRenderer.on('AGANI::new-tab', (e, markdownDocument) => {
+      if (markdownDocument) {
+        // Create tab with content.
+        dispatch('NEW_TAB_WITH_CONTENT', markdownDocument)
+      } else {
+        // Create an empty tab
+        dispatch('NEW_BLANK_FILE')
+      }
     })
   },
 
@@ -376,11 +423,53 @@ const actions = {
   },
 
   NEW_BLANK_FILE ({ commit, state, dispatch }) {
+    dispatch('SHOW_TAB_VIEW', false)
+
     const { tabs, lineEnding } = state
     const fileState = getBlankFileState(tabs, lineEnding)
     const { markdown } = fileState
     dispatch('UPDATE_CURRENT_FILE', fileState)
     bus.$emit('file-loaded', markdown)
+  },
+
+  /**
+   * Create a new tab from the given markdown document
+   *
+   * @param {*} context Store context
+   * @param {IMarkdownDocumentRaw} markdownDocument Class that represent a markdown document
+   */
+  NEW_TAB_WITH_CONTENT ({ commit, state, dispatch }, markdownDocument) {
+    if (!markdownDocument) {
+      console.warn('Cannot create a file tab without a markdown document!')
+      dispatch('NEW_BLANK_FILE')
+      return
+    }
+
+    dispatch('SHOW_TAB_VIEW', false)
+
+    const { markdown, isMixedLineEndings } = markdownDocument
+    const docState = createDocumentState(markdownDocument)
+    dispatch('UPDATE_CURRENT_FILE', docState)
+    bus.$emit('file-loaded', markdown)
+
+    if (isMixedLineEndings) {
+      const { filename, lineEnding } = markdownDocument
+      notice.notify({
+        title: 'Line Ending',
+        message: `${filename} has mixed line endings which are automatically normalized to ${lineEnding.toUpperCase()}.`,
+        type: 'primary',
+        time: 20000,
+        showConfirm: false
+      })
+    }
+  },
+
+  SHOW_TAB_VIEW ({ commit, state, dispatch }, always) {
+    const { tabs } = state
+    if (always || tabs.length <= 1) {
+      commit('SET_LAYOUT', { showTabBar: true })
+      dispatch('SET_LAYOUT_MENU_ITEM')
+    }
   },
 
   LISTEN_FOR_OPEN_BLANK_WINDOW ({ commit, state, dispatch }) {
@@ -415,7 +504,7 @@ const actions = {
   // },
 
   // Content change from realtime preview editor and source code editor
-  LISTEN_FOR_CONTENT_CHANGE ({ commit, state, rootState }, { markdown, wordCount, cursor, history }) {
+  LISTEN_FOR_CONTENT_CHANGE ({ commit, state, rootState }, { markdown, wordCount, cursor, history, toc }) {
     const { autoSave } = rootState.preferences
     const { projectTree } = rootState.project
     const { pathname, markdown: oldMarkdown, id } = state.currentFile
@@ -433,6 +522,8 @@ const actions = {
     if (cursor) commit('SET_CURSOR', cursor)
     // set history
     if (history) commit('SET_HISTORY', history)
+    // set toc
+    if (toc) commit('SET_TOC', toc)
 
     // change save status/save to file only when the markdown changed!
     if (markdown !== oldMarkdown) {
@@ -540,7 +631,46 @@ const actions = {
         commit('SET_TEXT_DIRECTION', textDirection)
       }
     })
+  },
+
+  LISTEN_FOR_FILE_CHANGE ({ commit, state, rootState }) {
+    ipcRenderer.on('AGANI::update-file', (e, { type, change }) => {
+      // TODO: Set `isSaved` to false.
+      // TODO: A new "changed" notification from different files overwrite the old notification - the old notification disappears.
+      if (type === 'unlink') {
+        return notice.notify({
+          title: 'File Removed on Disk',
+          message: `${change.pathname} has been removed or moved to other place`,
+          type: 'warning',
+          time: 0,
+          showConfirm: false
+        })
+      } else {
+        const { autoSave } = rootState.preferences
+        const { windowActive } = rootState
+        const { filename } = change.data
+        if (windowActive) return
+        if (autoSave) {
+          commit('LOAD_CHANGE', change)
+        } else {
+          notice.clear()
+          notice.notify({
+            title: 'File Changed on Disk',
+            message: `${filename} has been changed on disk, do you want to reload it?`,
+            showConfirm: true,
+            time: 0
+          })
+            .then(() => {
+              commit('LOAD_CHANGE', change)
+            })
+        }
+      }
+    })
+  },
+
+  ASK_FILE_WATCH ({ commit }, { pathname, watch }) {
+    ipcRenderer.send('AGANI::file-watch', { pathname, watch })
   }
 }
 
-export default { state, getters, mutations, actions }
+export default { state, mutations, actions }

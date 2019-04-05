@@ -26,9 +26,7 @@ const importRegister = ContentState => {
       nextSibling: null,
       children: []
     }
-
     const tokens = new Lexer({ disableInline: true }).lex(markdown)
-
     let token
     let block
     let value
@@ -64,10 +62,14 @@ const importRegister = ContentState => {
           break
         }
         case 'heading': {
-          const { headingStyle, depth, text } = token
-          value = '#'.repeat(+depth) + ` ${text}`
+          const { headingStyle, depth, text, marker } = token
+          value = headingStyle === 'atx' ? '#'.repeat(+depth) + ` ${text}` : text
           block = this.createBlock(`h${depth}`, value)
           block.headingStyle = headingStyle
+          if (marker) {
+            block.marker = marker
+          }
+
           this.appendChild(parentList[0], block)
           break
         }
@@ -78,7 +80,11 @@ const importRegister = ContentState => {
           break
         }
         case 'code': {
-          const { codeBlockStyle, text, lang = '' } = token
+          const { codeBlockStyle, text, lang: infostring = '' } = token
+
+          // GH#697, markedjs#1387
+          const lang = (infostring || '').match(/\S*/)[0]
+
           value = text
           if (value.endsWith('\n')) {
             value = value.replace(/\n+$/, '')
@@ -116,9 +122,14 @@ const importRegister = ContentState => {
           const thead = this.createBlock('thead')
           const tbody = this.createBlock('tbody')
           const theadRow = this.createBlock('tr')
+          const restoreTableEscapeCharacters = text => {
+            // NOTE: markedjs replaces all escaped "|" ("\|") characters inside a cell with "|".
+            //       We have to re-escape the chraracter to not break the table.
+            return text.replace(/\|/g, '\\|')
+          }
           for (const headText of header) {
             const i = header.indexOf(headText)
-            const th = this.createBlock('th', headText)
+            const th = this.createBlock('th', restoreTableEscapeCharacters(headText))
             Object.assign(th, { align: align[i] || '', column: i })
             this.appendChild(theadRow, th)
           }
@@ -126,7 +137,7 @@ const importRegister = ContentState => {
             const rowBlock = this.createBlock('tr')
             for (const cell of row) {
               const i = row.indexOf(cell)
-              const td = this.createBlock('td', cell)
+              const td = this.createBlock('td', restoreTableEscapeCharacters(cell))
               Object.assign(td, { align: align[i] || '', column: i })
               this.appendChild(rowBlock, td)
             }
@@ -187,10 +198,10 @@ const importRegister = ContentState => {
         }
         case 'loose_item_start':
         case 'list_item_start': {
-          const { listItemType, bulletListItemMarker, checked, type } = token
+          const { listItemType, bulletMarkerOrDelimiter, checked, type } = token
           block = this.createBlock('li')
           block.listItemType = checked !== undefined ? 'task' : listItemType
-          block.bulletListItemMarker = bulletListItemMarker
+          block.bulletMarkerOrDelimiter = bulletMarkerOrDelimiter
           block.isLooseListItem = type === 'loose_item_start'
           if (checked !== undefined) {
             const input = this.createBlock('input')
@@ -203,6 +214,9 @@ const importRegister = ContentState => {
         }
         case 'list_item_end': {
           parentList.shift()
+          break
+        }
+        case 'space': {
           break
         }
         default:
@@ -220,6 +234,8 @@ const importRegister = ContentState => {
     const turndownService = new TurndownService(turndownConfig)
     usePluginAddRules(turndownService)
     // remove double `\\` in Math but I dont know why there are two '\' when paste. @jocs
+    // fix #752, but I don't know why the &nbsp; vanlished.
+    html = html.replace(/&nbsp;/g, ' ')
     const markdown = turndownService.turndown(html) // .replace(/(\\)\\/g, '$1')
     return markdown
   }

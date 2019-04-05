@@ -1,12 +1,46 @@
 ### [unreleased]
 
+This update **fixes a XSS security vulnerability** when exporting a document.
+
 **:warning:Breaking Changes:**
 
 - Minimum supported macOS version is 10.10 (Yosemite)
+- Remove `lightColor` and `darkColor` in user preference (color change in view menu does not work any, and will remove when add custom theme.)
+- We recommand user not use block element in paragraph, please use block element in html block.
+
+*Not Recommand*
+
+```md
+foo<section>bar</section>zar
+```
+
+*Recommand*
+
+```md
+<div>
+  foo
+  <section>
+    bar
+  </section>
+  zar
+</div>
+```
 
 **:cactus:Feature**
 
 - Improve exception and error handling
+- Support for user-defined titlebar style
+- Support to open files in a new tab instead a new window (#574)
+- Add inline math to format menu and float box (#649)
+- GTK integration (#690)
+- Add recently used directories to recently opened files (#643)
+- Making images display smaller (#659)
+- Open local markdown file when you click on it in another tab (#359)
+- Clicking a link should open it in the browser (#425)
+- Support maxOS `dark mode`, when you change `mode dark or light` in system, Mark Text will change its theme.
+- Add new themes: Ulysses Light, Graphite Light, Material Dark and One Dark.
+- Watch file changed in tabs and show a notice(autoSave is `false`) or update the file(autoSave is `true`)
+- Support input inline Ruby charactors as raw html (#257)
 
 **:butterfly:Optimization**
 
@@ -16,6 +50,15 @@
 - You can now hide the quick insert hint (#621)
 - Adjusted quote inline math color (#592)
 - Fix inline math text align (#593)
+- Added MIME type to Linux desktop file
+- What is the character and number of left-top? (#666)
+- Inserting Codeblock should automatically set cursor into language field (#684)
+- Upstream: prismjs highlighting issues (#709)
+- Improvements for "Open Recent" (#616)
+- Make table of contents in sidebar collapsible (#404)
+- Hide titlebar control buttons in custom titlebar style
+- Corrected hamburger menu offset
+- Optimization of inline html displa, now you can nest other inline syntax in inline html(#849)
 
 **:beetle:Bug fix**
 
@@ -27,6 +70,45 @@
 - Allow pasting text into the code block language text-box (#553)
 - Fixed a crash when opening a directory with an unknown file extension
 - Fixed an issue with `Save all` and `Delete all` buttons in the side bar
+- Fixed exception when exporting a code block (#591)
+- Fixed recommended filename
+- Fixed multiple sidebar issues
+- Fixed wrong font and theme when opening a directory (#696)
+- Switching to another tab will now work in source-code mode too (#606)
+- Fixed forced line break in a list is display wrong. (#672)
+- Relative images are broken after exporting (#678)
+- Unable to paste text in table cell(#670)
+- Wrong padding when copy loose list to tight list(#706)
+- Display Autocompletion in inline math(#673)
+- Unable to export a document when the language identifier is undefined(#591)
+- Incorrect rendering of pipe in code block within table(#660)
+- Using extended code identifiers breaks code blocks (#697)
+- Renderer exception when pasting text with new line(s) into a heading (#671)
+- Fatal error when a directory is removed (#661)
+- Wrong font and theme when opening file/directory (#696)
+- Automatically wrap code block lines when printing or exporting as PDF (#710)
+- Can't change tab in source code mode (#606)
+- Minor checkbox list bug (#576)
+- A hard line break followed by a list doesn't work in preview mode (#708)
+- Ctrl + X (#622)
+- Exception when removing a code block in a specific case (#568)
+- List items are always copied as loose list (#705)
+- Runtime bug when insert order list by quick insert (#760)
+- Image inside HTML is not loaded (#754)
+- No space around copy-pasted links (#752)
+- Relative image reference in HTML is broken (#782)
+- Selection cannot be cancelled by up / down keys (#630)
+- Cannot create table while in typewriter mode (#679)
+- Emojis don't work properly (#769)
+- Fixed multiple parser issues (update marked.js to v0.6.1)
+- Fixed nest math block issue (#586)
+- Can't make a comma-separated list of dollar ($) amounts (#740)
+- Fixed [...] is displayed in gray and orange (#432)
+- Fixed an issue that relative images are not loaded after closing a tab
+- Add symbolic link support
+- Fixed bug when combine pre list and next list into one when inline update #707
+- Fix renderer error when selection in sidebar (#625)
+- Fixed list parse error [more info](https://github.com/marktext/marktext/issues/831#issuecomment-477719256)
 
 ### 0.13.65
 

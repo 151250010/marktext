@@ -23,6 +23,7 @@ class BaseFloat {
     this.floatBox = null
     this.container = null
     this.popper = null
+    this.lastScrollTop = null
     this.cb = noop
     this.init()
   }
@@ -76,20 +77,15 @@ class BaseFloat {
         this.hide()
       }
     }
-    const scrollHandler = _ => {
-      if (this.status) {
+    const scrollHandler = event => {
+      if (typeof this.lastScrollTop !== 'number') {
+        this.lastScrollTop = event.target.scrollTop
+        return
+      }
+      // only when scoll distance great than 50px, then hide the float box.
+      if (this.status && Math.abs(event.target.scrollTop - this.lastScrollTop) > 50) {
         this.hide()
       }
-    }
-
-    const themeChange = theme => {
-      const { container, floatBox } = this
-      ;[container, floatBox].forEach(ele => {
-        if (!ele.classList.contains(theme)) {
-          ele.classList.remove(theme === 'dark' ? 'light' : 'dark')
-          ele.classList.add(theme)
-        }
-      })
     }
 
     eventCenter.attachDOMEvent(document, 'click', this.hide.bind(this))
@@ -99,7 +95,6 @@ class BaseFloat {
     })
     eventCenter.attachDOMEvent(container, 'keydown', keydownHandler)
     eventCenter.attachDOMEvent(container, 'scroll', scrollHandler)
-    eventCenter.subscribe('theme-change', themeChange)
   }
 
   hide () {
@@ -111,6 +106,7 @@ class BaseFloat {
     }
     this.cb = noop
     eventCenter.dispatch('muya-float', this.name, false)
+    this.lastScrollTop = null
   }
 
   show (reference, cb = noop) {

@@ -26,6 +26,7 @@ class StateRender {
     this.container = container
   }
 
+  // collect link reference definition
   collectLabels (blocks) {
     this.labels.clear()
 
@@ -185,6 +186,7 @@ class StateRender {
         patch(oldCursorVnode, newCursorVnode)
       }
     }
+
     this.renderMermaid()
     this.renderDiagram()
   }

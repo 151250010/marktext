@@ -1,7 +1,6 @@
 <template>
   <div
     class="source-code"
-    :class="[theme]"
     ref="sourceCode"
   >
   </div>
@@ -10,21 +9,25 @@
 <script>
   import codeMirror, { setMode, setCursorAtLastLine, setTextDirection } from '../../codeMirror'
   import { wordCount as getWordCount } from 'muya/lib/utils'
+  import { mapState } from 'vuex'
   import { adjustCursor } from '../../util'
   import bus from '../../bus'
+  import { oneDarkThemes, railscastsThemes } from '@/config'
 
   export default {
     props: {
-      theme: {
-        type: String,
-        required: true
-      },
       markdown: String,
       cursor: Object,
       textDirection: {
         type: String,
         required: true
       }
+    },
+
+    computed: {
+      ...mapState({
+        'theme': state => state.preferences.theme
+      })
     },
 
     data () {
@@ -35,18 +38,6 @@
     },
 
     watch: {
-      theme: function (value, oldValue) {
-        const cm = this.$refs.sourceCode.querySelector('.CodeMirror')
-        if (value !== oldValue) {
-          if (value === 'dark') {
-            cm.classList.remove('cm-s-default')
-            cm.classList.add('cm-s-railscasts')
-          } else {
-            cm.classList.add('cm-s-default')
-            cm.classList.remove('cm-s-railscasts')
-          }
-        }
-      },
       textDirection: function (value, oldValue) {
         const { editor } = this
         if (value !== oldValue && editor) {
@@ -74,9 +65,14 @@
             }
           }
         }
-        if (theme === 'dark') codeMirrorConfig.theme = 'railscasts'
+        if (railscastsThemes.includes(theme)) {
+          codeMirrorConfig.theme = 'railscasts'
+        } else if (oneDarkThemes.includes(theme)) {
+          codeMirrorConfig.theme = 'one-dark'
+        }
         const editor = this.editor = codeMirror(container, codeMirrorConfig)
         bus.$on('file-loaded', this.setMarkdown)
+        bus.$on('file-changed', this.handleMarkdownChange)
         bus.$on('dotu-select', this.handleSelectDoutu)
 
         setMode(editor, 'markdown')
@@ -119,8 +115,16 @@
         })
       },
       setMarkdown (markdown) {
-        const { editor, cursor } = this
-        this.editor.setValue(markdown)
+        const { editor } = this
+        editor.setValue(markdown)
+        // // NOTE: Don't set the cursor because we load a new file - no tab switch.
+        setCursorAtLastLine(editor)
+      },
+      // Only listen to get changes. Do not set history or other things.
+      handleMarkdownChange({ markdown, cursor, renderCursor, history }) {
+        const { editor } = this
+        editor.setValue(markdown)
+        // Cursor is null when loading a file or creating a new tab in source code mode.
         if (cursor) {
           editor.setCursor(cursor)
         } else {
@@ -139,7 +143,8 @@
   }
   .source-code .CodeMirror {
     margin: 50px auto;
-    max-width: 860px;
+    max-width: var(--editorAreaWidth);
+    background: transparent;
   }
   .source-code .CodeMirror-gutters {
     border-right: none;
@@ -147,14 +152,6 @@
   }
   .source-code .CodeMirror-activeline-background,
   .source-code .CodeMirror-activeline-gutter {
-    background: #F2F6FC;
-  }
-  .source-code.dark,
-  .source-code.dark .CodeMirror {
-    background: var(--darkBgColor);
-  }
-  .dark.source-code .CodeMirror-activeline-background,
-  .dark.source-code .CodeMirror-activeline-gutter {
-    background: #333;
+    background: var(--floatHoverColor);
   }
 </style>

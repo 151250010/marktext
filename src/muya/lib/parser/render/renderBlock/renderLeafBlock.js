@@ -1,10 +1,9 @@
 import katex from 'katex'
 import mermaid from 'mermaid'
 import prism, { loadedCache } from '../../../prism/'
-import { slugify } from '../../../utils/dirtyToc'
-import { CLASS_OR_ID, DEVICE_MEMORY, isInElectron, PREVIEW_DOMPURIFY_CONFIG, HAS_TEXT_BLOCK_REG } from '../../../config'
+import { CLASS_OR_ID, DEVICE_MEMORY, PREVIEW_DOMPURIFY_CONFIG, HAS_TEXT_BLOCK_REG } from '../../../config'
 import { tokenizer } from '../../parse'
-import { snakeToCamel, sanitize, escapeHtml, getLongUniqueId } from '../../../utils'
+import { snakeToCamel, sanitize, escapeHtml, getLongUniqueId, getImageInfo } from '../../../utils'
 import { h, htmlToVNode } from '../snabbdom'
 import alignLeftIcon from '../../../assets/icons/align_left.svg'
 import alignRightIcon from '../../../assets/icons/align_right.svg'
@@ -80,11 +79,12 @@ export default function renderLeafBlock (block, cursor, activeBlocks, matches, u
       functionType !== 'languageInput'
     ) {
       const hasBeginRules = /^(h\d|span|hr)/.test(type)
-      tokens = tokenizer(text, highlights, hasBeginRules)
+      tokens = tokenizer(text, highlights, hasBeginRules, this.labels)
       if (highlights.length === 0 && useCache && DEVICE_MEMORY >= 4) {
         this.tokenCache.set(text, tokens)
       }
     }
+
     children = tokens.reduce((acc, token) => [...acc, ...this[snakeToCamel(token.type)](h, cursor, block, token)], [])
   }
 
@@ -105,10 +105,19 @@ export default function renderLeafBlock (block, cursor, activeBlocks, matches, u
         selector += `.${CLASS_OR_ID['AG_HTML_PREVIEW']}`
         const htmlContent = sanitize(code, PREVIEW_DOMPURIFY_CONFIG)
         // handle empty html bock
-        if (/<([a-z][a-z\d]*).*>\s*<\/\1>/.test(htmlContent)) {
+        if (/^<([a-z][a-z\d]*)[^>]*?>(\s*)<\/\1>$/.test(htmlContent.trim())) {
           children = htmlToVNode('<div class="ag-empty">&lt;Empty HTML Block&gt;</div>')
         } else {
-          children = htmlToVNode(htmlContent)
+          const parser = new DOMParser()
+          const doc = parser.parseFromString(htmlContent, 'text/html')
+          const imgs = doc.documentElement.querySelectorAll('img')
+          for (const img of imgs) {
+            const src = img.getAttribute('src')
+            const imageInfo = getImageInfo(src)
+            img.setAttribute('src', imageInfo.src)
+          }
+
+          children = htmlToVNode(doc.documentElement.querySelector('body').innerHTML)
         }
         break
       }
@@ -181,7 +190,7 @@ export default function renderLeafBlock (block, cursor, activeBlocks, matches, u
     children = [
       h('use', {
         attrs: {
-          'xlink:href': `.${iconSvg.url}`
+          'xlink:href': `${iconSvg.url}`
         }
       })
     ]
@@ -190,8 +199,7 @@ export default function renderLeafBlock (block, cursor, activeBlocks, matches, u
       // TODO: This should be the best place to create and update the TOC.
       //       Cache `block.key` and title and update only if necessary.
       Object.assign(data.dataset, {
-        head: type,
-        id: isInElectron ? slugify(text.replace(/^#+\s(.*)/, (_, p1) => p1)) : ''
+        head: type
       })
       selector += `.${headingStyle}`
     }
@@ -236,6 +244,9 @@ export default function renderLeafBlock (block, cursor, activeBlocks, matches, u
     selector += `.${CLASS_OR_ID['AG_LANGUAGE_INPUT']}`
     children = htmlToVNode(html)
   }
-
-  return h(selector, data, children)
+  if (!block.parent) {
+    return h(selector, data, [this.renderIcon(block), ...children])
+  } else {
+    return h(selector, data, children)
+  } 
 }

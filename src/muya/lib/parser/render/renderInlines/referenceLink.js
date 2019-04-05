@@ -15,20 +15,8 @@ export default function referenceLink (h, cursor, block, token, outerClass) {
     label
   } = token
   const MARKER = '['
-  let href = ''
-  let title = ''
   const key = (label + backlash.second).toLowerCase()
-  if (this.labels.has(key)) {
-    ({ href, title } = this.labels.get(key))
-  }
   const backlashStart = start + MARKER.length + anchor.length
-  const startMarker = this.highlight(
-    h,
-    block,
-    start,
-    start + MARKER.length,
-    token
-  )
   const content = [
     ...children.reduce((acc, to) => {
       const chunk = this[snakeToCamel(to.type)](h, cursor, block, to, className)
@@ -36,6 +24,14 @@ export default function referenceLink (h, cursor, block, token, outerClass) {
     }, []),
     ...this.backlashInToken(h, backlash.first, className, backlashStart, token)
   ]
+  const { href, title } = this.labels.get(key)
+  const startMarker = this.highlight(
+    h,
+    block,
+    start,
+    start + MARKER.length,
+    token
+  )
   const endMarker = this.highlight(
     h,
     block,

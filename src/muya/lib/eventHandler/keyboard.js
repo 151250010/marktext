@@ -54,6 +54,11 @@ class Keyboard {
         return
       }
 
+      // prevent dispatch `selectionChange` and `selectionFormats` by click the toolbar of table/html block and front icons
+      if (event.target.closest('[contenteditable=false]')) {
+        return
+      }
+
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         const selectionChanges = contentState.selectionChange()
@@ -72,6 +77,9 @@ class Keyboard {
     const { container, eventCenter, contentState } = this.muya
 
     const handler = event => {
+      if (event.metaKey || event.ctrlKey) {
+        container.classList.add('ag-meta-or-ctrl')
+      }
       if (
         this.shownFloat.size > 0 &&
         (
@@ -82,8 +90,10 @@ class Keyboard {
           event.key === EVENT_KEYS.ArrowDown
         )
       ) {
+        if (!this.shownFloat.has('ag-format-picker') && !this.shownFloat.has('ag-table-picker')) {
+          event.preventDefault()
+        }
         event.stopPropagation()
-        event.preventDefault()
         return
       }
       switch (event.key) {
@@ -150,10 +160,12 @@ class Keyboard {
   keyupBinding () {
     const { container, eventCenter, contentState } = this.muya
     const handler = event => {
+      container.classList.remove('ag-meta-or-ctrl')
       // check if edit emoji
       const node = selection.getSelectionStart()
       const paragraph = findNearestParagraph(node)
       const emojiNode = checkEditEmoji(node)
+
       if (
         paragraph &&
         emojiNode &&
@@ -176,9 +188,11 @@ class Keyboard {
       }
       // is show format float box?
       const { start, end } = selection.getCursorRange()
-
+      if (!start || !end) {
+        return
+      }
+ 
       if (
-        this.shownFloat.size === 0 &&
         !this.isComposed
       ) {
         const { start: oldStart, end: oldEnd } = contentState.cursor

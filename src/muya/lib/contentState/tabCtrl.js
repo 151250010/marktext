@@ -180,6 +180,9 @@ const tabCtrl = ContentState => {
     event.preventDefault()
 
     const { start, end } = selection.getCursorRange()
+    if (!start || !end) {
+      return
+    }
     const startBlock = this.getBlock(start.key)
     const endBlock = this.getBlock(end.key)
 
@@ -195,8 +198,7 @@ const tabCtrl = ContentState => {
       start.key === end.key &&
       start.offset === end.offset &&
       startBlock.type === 'span' &&
-      startBlock.functionType === 'codeLine' &&
-      startBlock.lang === 'markup'
+      (!startBlock.functionType || startBlock.functionType === 'codeLine' && startBlock.lang === 'markup')
     ) {
       const { text } = startBlock
       const lastWord = text.split(/\s+/).pop()

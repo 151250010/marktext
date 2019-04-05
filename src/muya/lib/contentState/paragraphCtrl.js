@@ -128,16 +128,17 @@ const paragraphCtrl = ContentState => {
     } else {
       if (start.key === end.key || (start.block.parent && start.block.parent === end.block.parent)) {
         const block = this.getBlock(start.key)
+        const paragraph = this.getBlock(block.parent)
         if (listType === 'task') {
           // 1. first update the block to bullet list
-          const listItemParagraph = this.updateList(block, 'bullet')
+          const listItemParagraph = this.updateList(paragraph, 'bullet', undefined, block)
           // 2. second update bullet list to task list
           setTimeout(() => {
             this.updateTaskListItem(listItemParagraph, listType)
             this.partialRender()
           })
         } else {
-          this.updateList(block, listType)
+          this.updateList(paragraph, listType, undefined, block)
         }
       } else {
         const { parent, startIndex, endIndex } = this.getCommonParent()
@@ -192,8 +193,7 @@ const paragraphCtrl = ContentState => {
     const startParents = this.getParents(startBlock)
     const endParents = this.getParents(endBlock)
     const hasFencedCodeBlockParent = () => {
-      return startParents.some(b => b.type === 'pre' && /code/.test(b.functionType)) ||
-        endParents.some(b => b.type === 'pre' && /code/.test(b.functionType))
+      return [...startParents, ...endParents].some(b => b.type === 'pre' && /code/.test(b.functionType))
     }
     // change fenced code block to p paragraph
     if (affiliation.length && affiliation[0].type === 'pre' && /code/.test(affiliation[0].functionType)) {
@@ -234,11 +234,18 @@ const paragraphCtrl = ContentState => {
           })
           this.appendChild(startBlock, inputBlock)
           this.appendChild(startBlock, codeBlock)
-        }
-
-        this.cursor = {
-          start: this.cursor.start,
-          end: this.cursor.end
+          const { key } = inputBlock
+          const offset = 0
+  
+          this.cursor = {
+            start: { key, offset },
+            end: { key, offset }
+          }
+        } else {
+          this.cursor = {
+            start: this.cursor.start,
+            end: this.cursor.end
+          }
         }
       } else if (!hasFencedCodeBlockParent()) {
         const { parent, startIndex, endIndex } = this.getCommonParent()
@@ -268,7 +275,7 @@ const paragraphCtrl = ContentState => {
           removeCache.push(child)
         }
         removeCache.forEach(b => this.removeBlock(b))
-        const key = codeBlock.children[0].key
+        const key = inputBlock.key
         const offset = 0
         this.cursor = {
           start: { key, offset },
@@ -321,6 +328,9 @@ const paragraphCtrl = ContentState => {
 
   ContentState.prototype.insertContainerBlock = function (functionType, value = '') {
     const { start, end } = selection.getCursorRange()
+    if (!start || !end) {
+      return
+    }
     if (start.key !== end.key) return
     let block = this.getBlock(start.key)
     if (block.type === 'span') {

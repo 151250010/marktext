@@ -12,6 +12,7 @@ const SpritePlugin = require('svg-sprite-loader/plugin')
 const postcssPresetEnv = require('postcss-preset-env')
 const { BundleAnalyzerPlugin } = require('webpack-bundle-analyzer')
 
+const { getRendererEnvironmentDefinitions } = require('./marktextEnvironment')
 const { dependencies } = require('../package.json')
 const proMode = process.env.NODE_ENV === 'production'
 /**
@@ -46,7 +47,7 @@ const rendererConfig = {
         }
       },
       {
-        test: /(katex|github\-markdown|prism[\-a-z]*)\.css$/,
+        test: /(katex|github\-markdown|prism[\-a-z]*|\.theme)\.css$/,
         use: [
           'to-string-loader',
           'css-loader'
@@ -54,10 +55,10 @@ const rendererConfig = {
       },
       {
         test: /\.css$/,
-        exclude: /(katex|github\-markdown|prism[\-a-z]*)\.css$/,
+        exclude: /(katex|github\-markdown|prism[\-a-z]*|\.theme)\.css$/,
         use: [
           proMode ? MiniCssExtractPlugin.loader : 'style-loader',
-          { loader: 'css-loader', options: { importLoader: 1 } },
+          { loader: 'css-loader', options: { importLoaders: 1 } },
           { loader: 'postcss-loader', options: {
             ident: 'postcss',
             plugins: () => [
@@ -97,7 +98,7 @@ const rendererConfig = {
             loader: 'svg-sprite-loader',
             options: {
               extract: true,
-              publicPath: '/static/'
+              publicPath: './static/'
             }
           },
           'svgo-loader'
@@ -152,6 +153,7 @@ const rendererConfig = {
         : false
     }),
     new webpack.NoEmitOnErrorsPlugin(),
+    new webpack.DefinePlugin(getRendererEnvironmentDefinitions()),
     new VueLoaderPlugin()
   ],
   output: {
@@ -182,7 +184,8 @@ if (!proMode) {
   )
 }
 
-if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test' &&
+  !process.env.MARKTEXT_DEV_HIDE_BROWSER_ANALYZER) {
   rendererConfig.plugins.push(
     new BundleAnalyzerPlugin()
   )

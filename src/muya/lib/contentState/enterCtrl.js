@@ -112,9 +112,7 @@ const enterCtrl = ContentState => {
       } else {
         newBlock = this.createBlockLi()
         newBlock.listItemType = parent.listItemType
-        if (parent.listItemType === 'bullet') {
-          newBlock.bulletListItemMarker = parent.bulletListItemMarker
-        }
+        newBlock.bulletMarkerOrDelimiter = parent.bulletMarkerOrDelimiter
       }
       newBlock.isLooseListItem = parent.isLooseListItem
       this.insertAfter(newBlock, parent)
@@ -147,6 +145,9 @@ const enterCtrl = ContentState => {
 
   ContentState.prototype.enterHandler = function (event) {
     const { start, end } = selection.getCursorRange()
+    if (!start || !end) {
+      return event.preventDefault()
+    }
     let block = this.getBlock(start.key)
     const endBlock = this.getBlock(end.key)
     let parent = this.getParent(block)
@@ -312,10 +313,16 @@ const enterCtrl = ContentState => {
         let { pre, post } = selection.chopHtmlByCursor(paragraph)
 
         if (/^h\d$/.test(block.type)) {
-          const PREFIX = /^#+/.exec(pre)[0]
-          post = `${PREFIX} ${post}`
+          if (block.headingStyle === 'atx') {
+            const PREFIX = /^#+/.exec(pre)[0]
+            post = `${PREFIX} ${post}`
+          }
           block.text = pre
           newBlock = this.createBlock(type, post)
+          newBlock.headingStyle = block.headingStyle
+          if (block.marker) {
+            newBlock.marker = block.marker
+          }
         } else if (block.type === 'p') {
           newBlock = this.chopBlockByCursor(block, start.key, start.offset)
         } else if (type === 'li') {
@@ -328,9 +335,7 @@ const enterCtrl = ContentState => {
             newBlock = this.chopBlockByCursor(block.children[0], start.key, start.offset)
             newBlock = this.createBlockLi(newBlock)
             newBlock.listItemType = block.listItemType
-            if (block.listItemType === 'bullet') {
-              newBlock.bulletListItemMarker = block.bulletListItemMarker
-            }
+            newBlock.bulletMarkerOrDelimiter = block.bulletMarkerOrDelimiter
           }
           newBlock.isLooseListItem = block.isLooseListItem
         }
@@ -351,9 +356,7 @@ const enterCtrl = ContentState => {
           } else {
             newBlock = this.createBlockLi()
             newBlock.listItemType = block.listItemType
-            if (block.listItemType === 'bullet') {
-              newBlock.bulletListItemMarker = block.bulletListItemMarker
-            }
+            newBlock.bulletMarkerOrDelimiter = block.bulletMarkerOrDelimiter
           }
           newBlock.isLooseListItem = block.isLooseListItem
         } else {

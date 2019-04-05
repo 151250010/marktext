@@ -1,10 +1,11 @@
-import path from 'path'
-import { app } from 'electron'
+import { app, systemPreferences } from 'electron'
 import appWindow from './window'
 import { isOsx } from './config'
 import { dockMenu } from './menus'
-import { isDirectory, isMarkdownFile } from './utils'
+import { isDirectory, isMarkdownFileOrLink, getMenuItemById, normalizeAndResolvePath } from './utils'
 import { watchers } from './utils/imagePathAutoComplement'
+import { selectTheme } from './actions/theme'
+import preference from './preference'
 
 class App {
   constructor () {
@@ -22,12 +23,12 @@ class App {
       app.commandLine.appendSwitch('remote-debugging-port', '8315')
     }
 
-    app.on('open-file', this.openFile.bind(this))
+    app.on('open-file', this.openFile)
 
-    app.on('ready', this.ready.bind(this))
+    app.on('ready', this.ready)
 
     app.on('window-all-closed', () => {
-      app.removeListener('open-file', this.openFile.bind(this))
+      app.removeListener('open-file', this.openFile)
       // close all the image path watcher
       for (const watcher of watchers.values()) {
         watcher.close()
@@ -63,15 +64,21 @@ class App {
     })
   }
 
-  ready () {
+  ready = () => {
     if (!isOsx && process.argv.length >= 2) {
       for (const arg of process.argv) {
         if (arg.startsWith('--')) {
           continue
-        } else if (isDirectory(arg) || isMarkdownFile(arg)) {
-          // Normalize path into an absolute path.
-          this.openFilesCache = [ path.resolve(arg) ]
-          break
+        } else if (isDirectory(arg) || isMarkdownFileOrLink(arg)) {
+          // Normalize and resolve the path or link target.
+          const resolved = normalizeAndResolvePath(arg)
+          if (resolved) {
+            // TODO: Allow to open multiple files.
+            this.openFilesCache = [ resolved ]
+            break
+          } else {
+            console.error(`[ERROR] Cannot resolve "${arg}".`)
+          }
         }
       }
     }
@@ -79,6 +86,32 @@ class App {
     // Set dock on macOS
     if (process.platform === 'darwin') {
       app.dock.setMenu(dockMenu)
+
+      // listen for system theme change and change Mark Text own `dark` and `light`,
+      //  In macOS 10.14 Mojave, 
+      // Apple introduced a new system-wide dark mode for all macOS computers. 
+      systemPreferences.subscribeNotification(
+        'AppleInterfaceThemeChangedNotification',
+        () => {
+          const { theme } = preference.getAll()
+          let setedTheme = null
+          if (systemPreferences.isDarkMode() && theme !== 'dark') {
+            selectTheme('dark')
+            setedTheme = 'dark'
+          }
+          if (!systemPreferences.isDarkMode() && theme === 'dark') {
+            selectTheme('light')
+            setedTheme = 'light'
+          }
+          if (setedTheme) {
+            const themeMenu = getMenuItemById('themeMenu')
+            const menuItem = themeMenu.submenu.items.filter(item => (item.id === setedTheme))[0]
+            if (menuItem) {
+              menuItem.checked = true
+            }
+          }
+        }
+      )
     }
 
     if (this.openFilesCache.length) {
@@ -89,7 +122,7 @@ class App {
     }
   }
 
-  openFile (event, path) {
+  openFile = (event, path) => {
     const { openFilesCache } = this
     event.preventDefault()
     if (app.isReady()) {
